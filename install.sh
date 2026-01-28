@@ -210,6 +210,8 @@ OLD_UDEV_DIR="/etc/udev/rules.d"
 OLD_CONFIG_FILE="/etc/motu-m4-optimizer.conf"
 OLD_CONFIG_EXAMPLE="/etc/motu-m4-optimizer.conf.example"
 OLD_TRAY_SCRIPT="/usr/local/bin/motu-m4-tray"
+OLD_TRAY_DESKTOP="/usr/share/applications/motu-m4-tray.desktop"
+OLD_TRAY_ICONS="/usr/share/icons/motu-m4"
 
 # Check if old installation exists
 check_old_installation() {
@@ -221,6 +223,8 @@ check_old_installation() {
     [ -f "${OLD_UDEV_DIR}/99-motu-m4-audio-optimizer.rules" ] && found=true
     [ -f "$OLD_CONFIG_FILE" ] && found=true
     [ -f "$OLD_TRAY_SCRIPT" ] && found=true
+    [ -f "$OLD_TRAY_DESKTOP" ] && found=true
+    [ -d "$OLD_TRAY_ICONS" ] && found=true
 
     echo "$found"
 }
@@ -237,6 +241,10 @@ backup_old_installation() {
         cp "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh" "$backup_dir/" 2>/dev/null
     [ -f "$OLD_TRAY_SCRIPT" ] && \
         cp "$OLD_TRAY_SCRIPT" "$backup_dir/" 2>/dev/null
+
+    # Backup tray desktop entry
+    [ -f "$OLD_TRAY_DESKTOP" ] && \
+        cp "$OLD_TRAY_DESKTOP" "$backup_dir/" 2>/dev/null
 
     # Backup services
     [ -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service" ] && \
@@ -277,6 +285,11 @@ remove_old_installation() {
     rm -f "$OLD_TRAY_SCRIPT"
     print_success "Old scripts removed"
 
+    # Remove old tray desktop entry and icons
+    rm -f "$OLD_TRAY_DESKTOP"
+    rm -rf "$OLD_TRAY_ICONS"
+    print_success "Old tray components removed"
+
     # Remove old services
     rm -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service"
     rm -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}-delayed.service"
@@ -311,7 +324,9 @@ migrate_from_motu_m4() {
         [ -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service" ] && echo "    - Service: ${OLD_SCRIPT_NAME}.service"
         [ -f "${OLD_UDEV_DIR}/99-motu-m4-audio-optimizer.rules" ] && echo "    - Udev rules: 99-motu-m4-audio-optimizer.rules"
         [ -f "$OLD_CONFIG_FILE" ] && echo "    - Config: $OLD_CONFIG_FILE"
-        [ -f "$OLD_TRAY_SCRIPT" ] && echo "    - Tray: $OLD_TRAY_SCRIPT"
+        [ -f "$OLD_TRAY_SCRIPT" ] && echo "    - Tray script: $OLD_TRAY_SCRIPT"
+        [ -f "$OLD_TRAY_DESKTOP" ] && echo "    - Tray desktop: $OLD_TRAY_DESKTOP"
+        [ -d "$OLD_TRAY_ICONS" ] && echo "    - Tray icons: $OLD_TRAY_ICONS"
         echo ""
 
         read -p "Do you want to migrate to the new generic optimizer? [Y/n] " -n 1 -r
