@@ -266,52 +266,109 @@ _show_jack_status() {
 # Functions to display audio interface hardware information from ALSA and USB subsystems.
 
 # Show audio interface details
-# Displays ALSA card info and USB device status.
+# Displays ALSA card info and USB device status for ALL detected interfaces.
 _show_motu_details() {
-    echo "🎵 audio interface Details:"
-    local motu_card
-    motu_card=$(get_motu_card_info)
+    echo "🎵 Audio Interface Details:"
 
-    if [ -n "$motu_card" ]; then
-        echo "   Card: $(cat "/proc/asound/$motu_card/id" 2>/dev/null)"
-        if [ -e "/proc/asound/$motu_card/stream0" ]; then
-            echo "   Connection: $(cat "/proc/asound/$motu_card/stream0" 2>/dev/null | head -1)"
-        fi
-        if [ -e "/proc/asound/$motu_card/usbmixer" ]; then
-            echo "   USB-Details: $(head -1 "/proc/asound/$motu_card/usbmixer" 2>/dev/null)"
-        fi
-    else
-        echo "   audio interface card not found in ALSA"
+    # Detect all interfaces
+    local interfaces
+    interfaces=$(detect_usb_audio_interfaces)
+
+    if [ -z "$interfaces" ]; then
+        echo "   No USB audio interfaces detected"
+        return
     fi
 
-    # USB device status
-    local motu_usb
-    motu_usb=$(lsusb 2>/dev/null | grep "Mark of the Unicorn")
-    if [ -n "$motu_usb" ]; then
-        echo "   USB-Device: $motu_usb"
-        local usb_bus
-        usb_bus=$(echo "$motu_usb" | awk '{print $2}')
-        echo "   USB Bus: $usb_bus"
-    else
-        echo "   audio interface not found in USB devices"
-    fi
+    local count=0
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        count=$((count + 1))
+
+        # Parse entry: card_name|alsa_id|usb_path|vendor:product|friendly_name
+        local card_name alsa_id usb_path vendor_product friendly_name
+        card_name=$(echo "$entry" | cut -d'|' -f1)
+        alsa_id=$(echo "$entry" | cut -d'|' -f2)
+        usb_path=$(echo "$entry" | cut -d'|' -f3)
+        vendor_product=$(echo "$entry" | cut -d'|' -f4)
+        friendly_name=$(echo "$entry" | cut -d'|' -f5)
+
+        echo ""
+        echo "   [$count] $friendly_name"
+        echo "       ALSA Card: $card_name (ID: $alsa_id)"
+
+        # Show connection info from stream0
+        if [ -n "$card_name" ] && [ -e "/proc/asound/$card_name/stream0" ]; then
+            local connection
+            connection=$(head -1 "/proc/asound/$card_name/stream0" 2>/dev/null)
+            [ -n "$connection" ] && echo "       Connection: $connection"
+        fi
+
+        # Show USB mixer details
+        if [ -n "$card_name" ] && [ -e "/proc/asound/$card_name/usbmixer" ]; then
+            echo "       USB-Mixer: $(head -1 "/proc/asound/$card_name/usbmixer" 2>/dev/null)"
+        fi
+
+        # Show USB path and ID
+        [ -n "$usb_path" ] && echo "       USB Path: $usb_path"
+        [ -n "$vendor_product" ] && echo "       USB ID: $vendor_product"
+    done <<< "$interfaces"
+
+    echo ""
+    echo "   Total: $count interface(s)"
 }
 
 # Show detailed Audio Interface hardware info
 _show_motu_hardware_details() {
-    echo "🎛️  audio interface hardware status:"
-    local motu_card
-    motu_card=$(get_motu_card_info)
+    echo "🎛️  Audio Interface Hardware Status:"
 
-    if [ -n "$motu_card" ]; then
-        echo "   Card: $(cat "/proc/asound/$motu_card/id" 2>/dev/null)"
-        echo "   Stream-Status: $(cat "/proc/asound/$motu_card/stream0" 2>/dev/null | head -3)"
-        if [ -e "/proc/asound/$motu_card/usbmixer" ]; then
-            echo "   USB-Mixer: $(head -1 "/proc/asound/$motu_card/usbmixer" 2>/dev/null)"
-        fi
-    else
-        echo "   audio interface card not found in ALSA"
+    # Detect all interfaces
+    local interfaces
+    interfaces=$(detect_usb_audio_interfaces)
+
+    if [ -z "$interfaces" ]; then
+        echo "   No USB audio interfaces detected"
+        return
     fi
+
+    local count=0
+    while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        count=$((count + 1))
+
+        # Parse entry: card_name|alsa_id|usb_path|vendor:product|friendly_name
+        local card_name alsa_id usb_path vendor_product friendly_name
+        card_name=$(echo "$entry" | cut -d'|' -f1)
+        alsa_id=$(echo "$entry" | cut -d'|' -f2)
+        usb_path=$(echo "$entry" | cut -d'|' -f3)
+        vendor_product=$(echo "$entry" | cut -d'|' -f4)
+        friendly_name=$(echo "$entry" | cut -d'|' -f5)
+
+        echo ""
+        echo "   [$count] $friendly_name ($alsa_id)"
+
+        # Show stream status
+        if [ -n "$card_name" ] && [ -e "/proc/asound/$card_name/stream0" ]; then
+            echo "       Stream-Status:"
+            cat "/proc/asound/$card_name/stream0" 2>/dev/null | head -5 | while read -r line; do
+                echo "         $line"
+            done
+        fi
+
+        # Show USB mixer details
+        if [ -n "$card_name" ] && [ -e "/proc/asound/$card_name/usbmixer" ]; then
+            echo "       USB-Mixer: $(head -1 "/proc/asound/$card_name/usbmixer" 2>/dev/null)"
+        fi
+
+        # Show USB details from sysfs
+        if [ -n "$usb_path" ] && [ -d "$usb_path" ]; then
+            local product speed version
+            product=$(cat "$usb_path/product" 2>/dev/null || echo "N/A")
+            speed=$(cat "$usb_path/speed" 2>/dev/null || echo "N/A")
+            version=$(cat "$usb_path/version" 2>/dev/null | tr -d ' ' || echo "N/A")
+            echo "       USB Product: $product"
+            echo "       USB Speed: ${speed}Mbps (USB $version)"
+        fi
+    done <<< "$interfaces"
 }
 
 # Show USB connection details
