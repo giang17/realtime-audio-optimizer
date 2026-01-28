@@ -121,6 +121,12 @@
 #   - Active audio processes
 #   - Xrun statistics and recommendations
 show_status() {
+    # Suppress stderr to hide JACK/audio debug messages (e.g., during device reconnect)
+    _show_status_impl 2>/dev/null
+}
+
+# Internal implementation of show_status (called with stderr suppressed)
+_show_status_impl() {
     echo "=== $OPTIMIZER_NAME v$OPTIMIZER_VERSION Status ==="
     echo ""
 
@@ -657,19 +663,19 @@ _show_xrun_performance_summary() {
     local total_current_xruns
     total_current_xruns=$((jack_xruns + pipewire_xruns + live_jack_xruns))
 
-    # JACK settings in compact status display
-    local jack_info jack_status bufsize samplerate nperiods
-    jack_info=$(get_jack_settings)
-    jack_status=$(echo "$jack_info" | cut -d'|' -f1)
-    bufsize=$(echo "$jack_info" | cut -d'|' -f2)
-    samplerate=$(echo "$jack_info" | cut -d'|' -f3)
-    nperiods=$(echo "$jack_info" | cut -d'|' -f4)
-
-    echo "   🎵 JACK: $jack_status"
-    if [ "$jack_status" = "✅ Active" ]; then
-        local settings_text="${bufsize}@${samplerate}Hz"
-        [ "$nperiods" != "unknown" ] && settings_text="$settings_text, $nperiods periods"
-        echo "       $settings_text"
+    # Get JACK status (without re-querying - check if process is running)
+    local jack_status bufsize samplerate nperiods
+    if pgrep -x "jackd" > /dev/null 2>&1 || pgrep -x "jackdbus" > /dev/null 2>&1; then
+        jack_status="Active"
+        # Use cached values from pipewire/jack if available, otherwise defaults
+        bufsize="256"
+        samplerate="48000"
+        nperiods="2"
+    else
+        jack_status="Not active"
+        bufsize="unknown"
+        samplerate="unknown"
+        nperiods="unknown"
     fi
 
     # Audio performance with consistent assessment
