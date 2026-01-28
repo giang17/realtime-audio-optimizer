@@ -1,0 +1,182 @@
+# Audio Interface Dynamic Optimizer - Configuration File
+# ============================================================================
+#
+# This file allows customization of the optimizer without modifying code.
+# Copy this file to /etc/realtime-audio-optimizer.conf and uncomment/modify values.
+#
+# Only uncommented variables will override the defaults.
+# All values shown are the defaults.
+#
+# ============================================================================
+
+# ============================================================================
+# CPU ASSIGNMENTS
+# ============================================================================
+#
+# Adjust these values to match your CPU topology.
+# Use "lscpu -e" to see your CPU layout.
+#
+# Default values are optimized for Intel 12th/13th Gen hybrid architecture:
+#   - P-Cores (Performance): CPUs 0-7 - High single-thread performance
+#   - E-Cores (Efficiency): CPUs 8-19 - Lower power, good for background tasks
+
+# CPUs for handling hardware interrupts (IRQs)
+# Recommendation: Use E-Cores to avoid interrupting audio processing
+# IRQ_CPUS="14-19"
+
+# CPUs for JACK/PipeWire audio server processes
+# Recommendation: Use dedicated P-Cores for lowest latency
+# AUDIO_MAIN_CPUS="6-7"
+
+# CPUs for DAW applications and audio plugins
+# Recommendation: Use P-Cores for maximum performance
+# DAW_CPUS="0-5"
+
+# CPUs for background audio tasks
+# Recommendation: Use E-Cores to reduce interference with main audio
+# BACKGROUND_CPUS="8-13"
+
+# Full CPU range (used for reset operations)
+# ALL_CPUS="0-19"
+
+# ============================================================================
+# REAL-TIME PRIORITY LEVELS
+# ============================================================================
+#
+# Real-time (SCHED_FIFO) priorities for audio processes.
+# Range: 1-99, higher = more priority (will preempt lower priority tasks)
+#
+# Priority hierarchy (highest to lowest):
+#   99 - JACK server: Must never be interrupted, handles all audio I/O
+#   85 - PipeWire: Audio graph processing
+#   80 - PipeWire-Pulse: PulseAudio compatibility layer
+#   70 - Audio apps: DAWs, synths, plugins - below audio servers
+#
+# Note: Requires appropriate RT permissions (rtkit or limits.conf)
+
+# RT_PRIORITY_JACK=99
+# RT_PRIORITY_PIPEWIRE=85
+# RT_PRIORITY_PULSE=80
+# RT_PRIORITY_AUDIO=70
+
+# ============================================================================
+# TIMING INTERVALS
+# ============================================================================
+#
+# Intervals control how often the optimizer checks and adjusts settings.
+# Lower values = more responsive but higher CPU overhead
+# Higher values = less overhead but slower reaction to changes
+#
+# All values are in seconds.
+
+# Main monitoring loop interval
+# MONITOR_INTERVAL=5
+
+# Interval for checking and adjusting process affinity
+# PROCESS_CHECK_INTERVAL=30
+
+# Interval for checking xrun counts
+# XRUN_CHECK_INTERVAL=10
+
+# Maximum wait time for user audio services (PipeWire/JACK) during startup
+# MAX_AUDIO_WAIT=45
+
+# ============================================================================
+# XRUN MONITORING THRESHOLDS
+# ============================================================================
+#
+# Xruns (buffer underruns/overruns) indicate audio dropouts.
+# These thresholds determine when warnings are triggered during monitoring.
+
+# Xruns per 30 seconds before warning is shown
+# XRUN_WARNING_THRESHOLD=10
+
+# Xruns per 30 seconds considered severe (with other issues)
+# XRUN_SEVERE_THRESHOLD=5
+
+# ============================================================================
+# ADDITIONAL AUDIO PROCESSES
+# ============================================================================
+#
+# Add your own audio applications to be optimized.
+# These are added to the built-in list of known audio processes.
+# Space-separated list of process names.
+#
+# Example: EXTRA_AUDIO_PROCESSES="my-custom-daw my-synth wine-preloader"
+
+# EXTRA_AUDIO_PROCESSES=""
+
+# ============================================================================
+# Audio Interface USB IDENTIFIERS
+# ============================================================================
+#
+# Only change these if you have a different MOTU device.
+#
+# RT_AUDIO_VENDOR_ID="07fd"
+# RT_AUDIO_PRODUCT_ID="000b"
+# RT_AUDIO_CARD_ID="M4"
+
+# ============================================================================
+# FILE PATHS
+# ============================================================================
+#
+# Custom log and state file locations.
+# Only change if you have specific requirements.
+#
+# LOG_FILE="/var/log/realtime-audio-optimizer.log"
+# STATE_FILE="/var/run/realtime-audio-state"
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+#
+# Log levels control verbosity of output:
+#   DEBUG - All messages, including internal state (verbose)
+#   INFO  - Normal operation messages (default)
+#   WARN  - Warnings and errors only
+#   ERROR - Only critical errors
+#
+# Set to control how much detail is logged.
+
+# RT_AUDIO_LOG_LEVEL="INFO"
+
+# ============================================================================
+# SYSTEM TRAY CONFIGURATION (OPTIONAL)
+# ============================================================================
+#
+# Optional system tray icon for visual status display.
+# Requires yad package to be installed: sudo apt install yad
+#
+# The tray icon shows:
+#   - Green: Audio Interface connected and optimized
+#   - Blue: Audio Interface connected but not optimized
+#   - Orange: Warning (xruns detected)
+#   - Gray: Audio Interface not connected
+#
+# Right-click menu provides quick access to:
+#   - View status
+#   - Live xrun monitoring
+#   - Start/stop optimization
+
+# Enable tray state updates (allows tray icon to reflect current status)
+# The optimizer writes status to a file that the tray application reads.
+# Default: false (disabled to avoid writing extra files)
+#
+# TRAY_ENABLED="false"
+
+# Tray update interval in seconds (how often the tray polls the state file)
+# Lower values = more responsive, slightly higher CPU usage
+# TRAY_UPDATE_INTERVAL=5
+
+# Show desktop notification when xruns occur
+# TRAY_NOTIFY_ON_XRUN="true"
+
+# Show desktop notification on state changes (connect/disconnect)
+# TRAY_NOTIFY_ON_STATE_CHANGE="true"
+
+# Path to the tray state file (read by tray application)
+# Only change if you have specific requirements.
+# TRAY_STATE_FILE="/var/run/realtime-audio-tray-state"
+
+# Tray icon directory
+# TRAY_ICON_DIR="/usr/share/icons/realtime-audio"

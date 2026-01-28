@@ -1,0 +1,20 @@
+# Realtime Audio Optimizer - udev rules for USB audio interfaces
+#
+# Triggers the realtime-audio-optimizer service when any USB audio device is connected.
+# This uses a generic approach that works with all USB Audio Class devices.
+
+# Debug logging for sound events
+SUBSYSTEM=="sound", ACTION=="add", \
+    RUN+="/bin/logger 'RT-Audio-Optimizer: Sound device added: %k'"
+
+# When a sound control device is added, check for USB audio interfaces
+# The /proc/asound/*/usbid file exists only for USB audio devices
+SUBSYSTEM=="sound", KERNEL=="controlC*", ACTION=="add", \
+    RUN+="/bin/logger 'RT-Audio-Optimizer: Control device added: %k'", \
+    RUN+="/bin/sleep 0.5", \
+    RUN+="/bin/sh -c 'if ls /proc/asound/*/usbid 2>/dev/null | head -1 | xargs -I{} test -f {} 2>/dev/null; then logger \"RT-Audio-Optimizer: USB audio interface detected - Starting service (delayed)\"; systemctl --no-block start realtime-audio-optimizer-delayed.service; fi'"
+
+# When a sound device is removed, stop the service
+SUBSYSTEM=="sound", KERNEL=="card*", ACTION=="remove", \
+    RUN+="/bin/logger 'RT-Audio-Optimizer: Sound device removed - Stopping service'", \
+    RUN+="/bin/systemctl --no-block stop realtime-audio-optimizer.service"

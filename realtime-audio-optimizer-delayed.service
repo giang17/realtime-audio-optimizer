@@ -1,0 +1,30 @@
+[Unit]
+Description=Realtime Audio Optimizer (Delayed for User Sessions)
+Documentation=man:systemd.service(5)
+After=sound.target multi-user.target graphical.target
+Wants=sound.target
+# Delayed service - waits for user session audio services
+
+[Service]
+Type=oneshot
+# Delayed execution for user session audio services
+ExecStartPre=/bin/sleep 15
+ExecStart=/usr/local/bin/realtime-audio-optimizer.sh once-delayed
+ExecStop=/usr/local/bin/realtime-audio-optimizer.sh stop
+RemainAfterExit=yes
+User=root
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Increase timeout for wait times
+TimeoutStartSec=60
+
+# Service runs only on-demand, no automatic restart
+# Restart=no (default)
+
+[Install]
+# Do not start automatically - started by udev
+# WantedBy=multi-user.target

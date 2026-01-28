@@ -1,0 +1,25 @@
+[Unit]
+Description=Realtime Audio Optimizer (On-Demand)
+Documentation=man:systemd.service(5)
+After=sound.target multi-user.target
+Wants=sound.target
+# On-demand service - started/stopped by udev rules
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/realtime-audio-optimizer.sh once
+ExecStop=/usr/local/bin/realtime-audio-optimizer.sh stop
+RemainAfterExit=yes
+User=root
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Service runs only on-demand, no automatic restart
+# Restart=no (default)
+
+[Install]
+# Do not start automatically - started by udev
+# WantedBy=multi-user.target
