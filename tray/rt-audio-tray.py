@@ -29,12 +29,11 @@ from PyQt5.QtCore import QTimer, Qt, QRectF
 from PyQt5.QtSvg import QSvgRenderer
 
 # Configuration
-TRAY_NAME = "Audio Interface Optimizer"
+TRAY_NAME = "Realtime Audio Optimizer"
 STATE_FILE = os.environ.get("TRAY_STATE_FILE", "/var/run/rt-audio-tray-state")
-ICON_DIR = os.environ.get("TRAY_ICON_DIR", "/usr/share/icons/rt-audio")
+ICON_DIR = os.environ.get("TRAY_ICON_DIR", "/usr/share/icons/realtime-audio")
 UPDATE_INTERVAL = int(os.environ.get("TRAY_UPDATE_INTERVAL", "5")) * 1000  # ms
-OPTIMIZER_CMD = "rt-audio-dynamic-optimizer"
-MOTU_CARD_ID = os.environ.get("MOTU_CARD_ID", "M4")
+OPTIMIZER_CMD = "realtime-audio-optimizer"
 
 # Icons
 ICON_OPTIMIZED = f"{ICON_DIR}/motu-optimized.svg"
@@ -100,14 +99,14 @@ def load_svg_icon(path: str, fallback_color: str = "gray") -> QIcon:
     return create_fallback_icon(fallback_color)
 
 
-class MotuM4Tray(QSystemTrayIcon):
+class AudioOptimizerTray(QSystemTrayIcon):
     """System tray icon for Realtime Audio Optimizer."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.last_state = ""
-        self.last_motu_connected = None
+        self.last_motu_connected = None  # Keep variable name for compatibility
         self.last_xruns = "0"
 
         # Set initial icon and tooltip
@@ -124,33 +123,36 @@ class MotuM4Tray(QSystemTrayIcon):
         # Left-click also shows menu (like yad behavior)
         self.activated.connect(self.on_activated)
 
-    def check_motu_connected(self) -> bool:
-        """Check if Audio Interface is connected via ALSA or USB."""
-        # Check ALSA cards - primary detection method
+    def check_audio_interface_connected(self) -> bool:
+        """Check if any USB Audio Interface is connected via ALSA."""
+        # Check ALSA cards for USB audio devices
         for card_path in glob.glob("/proc/asound/card*"):
-            id_file = Path(card_path) / "id"
-            if id_file.exists():
+            # Check for usbid file (present for USB audio devices)
+            usbid_file = Path(card_path) / "usbid"
+            if usbid_file.exists():
+                return True
+
+            # Alternative: check usbbus file
+            usbbus_file = Path(card_path) / "usbbus"
+            if usbbus_file.exists():
+                return True
+
+            # Alternative: check stream0 for USB Audio signature
+            stream0_file = Path(card_path) / "stream0"
+            if stream0_file.exists():
                 try:
-                    card_id = id_file.read_text().strip()
-                    if card_id == MOTU_CARD_ID:
+                    content = stream0_file.read_text()
+                    if "USB Audio" in content:
                         return True
                 except (IOError, OSError):
                     pass
 
-        # Fallback: USB check
-        try:
-            result = subprocess.run(
-                ["lsusb"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if "Mark of the Unicorn" in result.stdout:
-                return True
-        except (subprocess.SubprocessError, FileNotFoundError):
-            pass
-
         return False
+
+    # Keep old method name for compatibility
+    def check_motu_connected(self) -> bool:
+        """Alias for check_audio_interface_connected (backward compatibility)."""
+        return self.check_audio_interface_connected()
 
     def read_state_file(self) -> dict:
         """Read and parse the state file."""
@@ -178,7 +180,7 @@ class MotuM4Tray(QSystemTrayIcon):
 
     def get_current_icon(self) -> QIcon:
         """Determine the appropriate icon based on device and state."""
-        if not self.check_motu_connected():
+        if not self.check_audio_interface_connected():
             return load_svg_icon(ICON_DISCONNECTED, "gray")
 
         state_data = self.read_state_file()
@@ -200,8 +202,8 @@ class MotuM4Tray(QSystemTrayIcon):
         - Orange: Warning (xruns detected)
         - Gray: Audio Interface not connected
         """
-        if not self.check_motu_connected():
-            return f"{TRAY_NAME}\nGetrennt"
+        if not self.check_audio_interface_connected():
+            return f"{TRAY_NAME}\nKein Audio-Interface"
 
         state_data = self.read_state_file()
         state = state_data.get("state", "connected")
@@ -236,20 +238,20 @@ class MotuM4Tray(QSystemTrayIcon):
 
     def update_tray(self):
         """Update tray icon and tooltip."""
-        motu_connected = self.check_motu_connected()
+        interface_connected = self.check_audio_interface_connected()
         state_data = self.read_state_file()
-        current_state = state_data.get("state", "connected") if motu_connected else "disconnected"
+        current_state = state_data.get("state", "connected") if interface_connected else "disconnected"
         current_xruns = state_data.get("xruns_30s", "0")
 
         # Update icon if state changed
-        if motu_connected != self.last_motu_connected or current_state != self.last_state:
+        if interface_connected != self.last_motu_connected or current_state != self.last_state:
             self.setIcon(self.get_current_icon())
             self.setToolTip(self.get_tooltip())
-            self.last_motu_connected = motu_connected
+            self.last_motu_connected = interface_connected
             self.last_state = current_state
 
         # Flash warning icon on xrun increase
-        if motu_connected and current_xruns != self.last_xruns:
+        if interface_connected and current_xruns != self.last_xruns:
             try:
                 if int(current_xruns) > int(self.last_xruns or "0"):
                     self.setIcon(load_svg_icon(ICON_WARNING, "yellow"))
@@ -439,7 +441,7 @@ def main():
         sys.exit(1)
 
     # Create and show tray icon
-    tray = MotuM4Tray()
+    tray = AudioOptimizerTray()
     tray.show()
 
     sys.exit(app.exec_())

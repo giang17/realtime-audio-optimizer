@@ -20,11 +20,11 @@ set -u
 # CONFIGURATION
 # ============================================================================
 
-TRAY_NAME="Audio Interface Optimizer"
+TRAY_NAME="Realtime Audio Optimizer"
 STATE_FILE="${TRAY_STATE_FILE:-/var/run/rt-audio-tray-state}"
-ICON_DIR="${TRAY_ICON_DIR:-/usr/share/icons/rt-audio}"
+ICON_DIR="${TRAY_ICON_DIR:-/usr/share/icons/realtime-audio}"
 UPDATE_INTERVAL="${TRAY_UPDATE_INTERVAL:-5}"
-OPTIMIZER_CMD="rt-audio-dynamic-optimizer"
+OPTIMIZER_CMD="realtime-audio-optimizer"
 
 # FIFO for yad communication
 FIFO_DIR="/tmp"
@@ -37,8 +37,7 @@ ICON_CONNECTED="${ICON_DIR}/motu-connected.svg"
 ICON_WARNING="${ICON_DIR}/motu-warning.svg"
 ICON_DISCONNECTED="${ICON_DIR}/motu-disconnected.svg"
 
-# Audio Interface detection
-MOTU_CARD_ID="${MOTU_CARD_ID:-M4}"
+# Audio Interface detection (generic - any USB audio device)
 
 # PID tracking
 YAD_PID=""
@@ -92,26 +91,29 @@ check_dependencies() {
     fi
 }
 
-# Check if Audio Interface is connected (independent of daemon state file)
+# Check if any USB Audio Interface is connected (independent of daemon state file)
 # This allows the tray to detect device status even when daemon is not running
 check_rt_audio_connected() {
-    # Check ALSA cards - primary detection method
+    # Check ALSA cards for USB audio devices
     for card in /proc/asound/card*; do
-        if [ -e "$card/id" ]; then
-            local card_id
-            card_id=$(cat "$card/id" 2>/dev/null)
-            if [ "$card_id" = "$MOTU_CARD_ID" ]; then
-                echo "true"
-                return
-            fi
+        # Check for usbid file (present for USB audio devices)
+        if [ -e "$card/usbid" ]; then
+            echo "true"
+            return
+        fi
+
+        # Alternative: check usbbus file
+        if [ -e "$card/usbbus" ]; then
+            echo "true"
+            return
+        fi
+
+        # Alternative: check stream0 for USB Audio signature
+        if [ -e "$card/stream0" ] && grep -q "USB Audio" "$card/stream0" 2>/dev/null; then
+            echo "true"
+            return
         fi
     done
-
-    # Additional USB check if not found via ALSA
-    if lsusb 2>/dev/null | grep -q "Mark of the Unicorn"; then
-        echo "true"
-        return
-    fi
 
     echo "false"
 }
@@ -399,7 +401,7 @@ start_tray() {
 
     # Start yad notification icon reading from FIFO
     # Use exec -a to set process name for KDE system tray display
-    (exec -a "MOTU-M4-Optimizer" yad --notification \
+    (exec -a "RT-Audio-Optimizer" yad --notification \
         --image="$initial_icon" \
         --text="$TRAY_NAME" \
         --menu="$menu" \
