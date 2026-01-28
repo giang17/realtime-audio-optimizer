@@ -21,6 +21,7 @@ Works with any USB Audio Class 1.0/2.0 compliant device, including:
 - MOTU (M4, M2, UltraLite, etc.)
 - Focusrite (Scarlett series, Clarett, etc.)
 - Behringer (UMC series, U-PHORIA, etc.)
+- Steinberg (UR series, etc.)
 - PreSonus (Studio series, AudioBox, etc.)
 - Universal Audio (Volt series)
 - Audient, Native Instruments, RME, and more
@@ -34,7 +35,7 @@ Works with any USB Audio Class 1.0/2.0 compliant device, including:
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/realtime-audio-optimizer.git
+git clone https://github.com/giang17/realtime-audio-optimizer.git
 cd realtime-audio-optimizer
 sudo ./install.sh install
 ```
@@ -151,7 +152,7 @@ sudo ./install.sh uninstall
 
 ## Credits
 
-Based on [MOTU M4 Dynamic Optimizer](https://github.com/yourusername/motu-m4-dynamic-optimizer).
+Based on [MOTU M4 Dynamic Optimizer](https://github.com/giang17/motu-m4-dynamic-optimizer).
 
 ## License
 
