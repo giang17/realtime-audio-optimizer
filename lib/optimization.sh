@@ -89,17 +89,15 @@ activate_audio_optimizations() {
     set_state "optimized"
     log_info "Hybrid audio optimizations activated - Stability and performance optimal!"
 
-    # Update tray state if enabled
-    if declare -f tray_write_state &> /dev/null && declare -f tray_is_enabled &> /dev/null; then
-        if tray_is_enabled; then
-            local jack_settings
-            if declare -f get_jack_compact_info &> /dev/null; then
-                jack_settings=$(get_jack_compact_info 2>/dev/null || echo "unknown")
-            else
-                jack_settings="unknown"
-            fi
-            tray_write_state "optimized" "connected" "active" "$jack_settings" "0"
+    # Update tray state (always write so any tray app can read it)
+    if declare -f tray_write_state &> /dev/null; then
+        local jack_settings
+        if declare -f get_jack_compact_info &> /dev/null; then
+            jack_settings=$(get_jack_compact_info 2>/dev/null || echo "unknown")
+        else
+            jack_settings="unknown"
         fi
+        tray_write_state "optimized" "connected" "active" "$jack_settings" "0"
     fi
 }
 
@@ -130,11 +128,9 @@ deactivate_audio_optimizations() {
     set_state "standard"
     log_info "Hybrid optimizations deactivated, system reset to standard"
 
-    # Update tray state if enabled
-    if declare -f tray_write_state &> /dev/null && declare -f tray_is_enabled &> /dev/null; then
-        if tray_is_enabled; then
-            tray_write_state "disconnected" "disconnected" "inactive" "unknown" "0"
-        fi
+    # Update tray state (always write so any tray app can read it)
+    if declare -f tray_write_state &> /dev/null; then
+        tray_write_state "disconnected" "disconnected" "inactive" "unknown" "0"
     fi
 }
 

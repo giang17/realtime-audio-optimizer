@@ -149,24 +149,22 @@ main_monitoring_loop() {
                 last_xrun_count=$?
                 xrun_check_counter=0
 
-                # Update tray state with xrun count
-                if declare -f tray_write_state &> /dev/null && declare -f tray_is_enabled &> /dev/null; then
-                    if tray_is_enabled; then
-                        local tray_state="optimized"
-                        local jack_settings="unknown"
-                        if declare -f get_jack_compact_info &> /dev/null; then
-                            jack_settings=$(get_jack_compact_info 2>/dev/null || echo "unknown")
-                        fi
-                        # Set warning state if xruns detected
-                        if [ "$last_xrun_count" -gt "$XRUN_WARNING_THRESHOLD" ]; then
-                            tray_state="warning"
-                        fi
-                        tray_write_state "$tray_state" "connected" "active" "$jack_settings" "$last_xrun_count"
+                # Update tray state with xrun count (always write so any tray app can read it)
+                if declare -f tray_write_state &> /dev/null; then
+                    local tray_state="optimized"
+                    local jack_settings="unknown"
+                    if declare -f get_jack_compact_info &> /dev/null; then
+                        jack_settings=$(get_jack_compact_info 2>/dev/null || echo "unknown")
+                    fi
+                    # Set warning state if xruns detected
+                    if [ "$last_xrun_count" -gt "$XRUN_WARNING_THRESHOLD" ]; then
+                        tray_state="warning"
+                    fi
+                    tray_write_state "$tray_state" "connected" "active" "$jack_settings" "$last_xrun_count"
 
-                        # Send xrun notification if enabled
-                        if [ "$last_xrun_count" -gt 0 ] && declare -f tray_notify_xrun &> /dev/null; then
-                            tray_notify_xrun "$last_xrun_count"
-                        fi
+                    # Send xrun notification if enabled
+                    if [ "$last_xrun_count" -gt 0 ] && declare -f tray_notify_xrun &> /dev/null; then
+                        tray_notify_xrun "$last_xrun_count"
                     fi
                 fi
             fi

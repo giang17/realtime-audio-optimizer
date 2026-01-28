@@ -1,13 +1,13 @@
 [Desktop Entry]
-Name=Audio Interface Optimizer Tray
+Name=Realtime Audio Optimizer
 GenericName=Audio Optimizer Tray
 Comment=System tray icon for Realtime Audio Optimizer
 Exec=rt-audio-tray
-Icon=/usr/share/icons/rt-audio/motu-optimized.svg
+Icon=/usr/share/icons/realtime-audio/motu-optimized.svg
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Settings;
-Keywords=motu;audio;optimizer;tray;jack;pipewire;
+Keywords=audio;optimizer;tray;jack;pipewire;realtime;
 StartupNotify=false
 X-GNOME-Autostart-enabled=false
 X-GNOME-Autostart-Delay=5

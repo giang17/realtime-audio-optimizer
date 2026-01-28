@@ -53,19 +53,19 @@ tray_check_dependencies() {
     command -v yad &> /dev/null
 }
 
-# Check if tray is enabled in configuration
-# Returns 0 if enabled, 1 if disabled or dependencies missing
+# Check if tray state writing is enabled in configuration
+# Returns 0 if enabled, 1 if disabled
+# Note: This only controls whether the state file is written.
+#       The PyQt5 tray application can still read state from optimizer output.
 tray_is_enabled() {
     # Check if TRAY_ENABLED is set and true
     if [ "${TRAY_ENABLED:-false}" != "true" ]; then
         return 1
     fi
 
-    # Check if yad is available
-    if ! tray_check_dependencies; then
-        return 1
-    fi
-
+    # Note: We don't check for yad anymore because:
+    # 1. The PyQt5 tray doesn't need yad
+    # 2. State file is useful for any tray implementation
     return 0
 }
 
@@ -76,17 +76,13 @@ tray_get_state_file() {
 
 # Write current status to tray state file
 # Args: state, motu, jack, jack_settings, xruns
+# Note: Always writes state file so any tray application can read it
 tray_write_state() {
     local state="${1:-disconnected}"
     local motu="${2:-disconnected}"
     local jack="${3:-inactive}"
     local jack_settings="${4:-unknown}"
     local xruns="${5:-0}"
-
-    # Only write if tray is enabled
-    if ! tray_is_enabled; then
-        return 0
-    fi
 
     local state_file
     state_file=$(tray_get_state_file)
