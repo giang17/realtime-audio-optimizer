@@ -90,6 +90,30 @@ The optimizer uses a hybrid strategy optimized for Intel Alder Lake / Raptor Lak
 
 Adjust CPU ranges in `/etc/realtime-audio-optimizer.conf` for different CPU configurations.
 
+### Required: Kernel Boot Parameters
+
+For optimal IRQ handling, the IRQ CPUs (14-19) must be isolated from the kernel scheduler. Add these parameters to your GRUB configuration:
+
+```bash
+# Edit GRUB config
+sudo nano /etc/default/grub
+
+# Add or modify this line:
+GRUB_CMDLINE_LINUX="isolcpus=14-19 nohz_full=14-19 rcu_nocbs=14-19 threadirqs"
+
+# Apply changes
+sudo update-grub
+sudo reboot
+```
+
+**Parameter explanation:**
+- `isolcpus=14-19` - Isolates these CPUs from the general scheduler (reserved for IRQs)
+- `nohz_full=14-19` - Disables timer ticks on these CPUs when idle (reduces latency)
+- `rcu_nocbs=14-19` - Offloads RCU callbacks from these CPUs (prevents latency spikes)
+- `threadirqs` - Enables threaded IRQ handlers (allows RT priority assignment)
+
+> **Note:** Adjust the CPU range (14-19) to match your `IRQ_CPUS` configuration. Without these parameters, the optimizer will still work but cannot achieve the lowest possible latency.
+
 ## Configuration
 
 Copy the example config and customize:
