@@ -174,10 +174,14 @@ sudo systemctl stop realtime-audio-optimizer
 sudo ./install.sh uninstall
 ```
 
+## Releases
+
+For release notes with download links, see [GitHub Releases](https://github.com/giang17/realtime-audio-optimizer/releases).
+
 ## Credits
 
 Based on [MOTU M4 Dynamic Optimizer](https://github.com/giang17/motu-m4-dynamic-optimizer).
 
 ## License
 
-MIT License
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
