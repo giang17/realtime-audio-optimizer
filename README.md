@@ -77,6 +77,9 @@ The optimizer automatically activates when a USB audio interface is connected vi
 rt-audio-tray
 ```
 
+![System Tray](tray-tooltip.png)
+*Tooltip shows interface name, optimization status, and JACK latency info*
+
 ## CPU Strategy (Intel 12th/13th/14th Gen Hybrid)
 
 The optimizer uses a hybrid strategy optimized for Intel Alder Lake / Raptor Lake / Arrow Lake CPUs:

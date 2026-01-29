@@ -149,6 +149,121 @@ class AudioOptimizerTray(QSystemTrayIcon):
 
         return False
 
+    def get_interface_name(self) -> str:
+        """Get the name of the connected USB audio interface."""
+        for card_path in glob.glob("/proc/asound/card*"):
+            # Check for usbid file (present for USB audio devices)
+            usbid_file = Path(card_path) / "usbid"
+            usbbus_file = Path(card_path) / "usbbus"
+            stream0_file = Path(card_path) / "stream0"
+
+            is_usb = usbid_file.exists() or usbbus_file.exists()
+
+            if not is_usb and stream0_file.exists():
+                try:
+                    content = stream0_file.read_text()
+                    is_usb = "USB Audio" in content
+                except (IOError, OSError):
+                    pass
+
+            if is_usb:
+                # Try to get friendly name from stream0
+                if stream0_file.exists():
+                    try:
+                        first_line = stream0_file.read_text().split('\n')[0]
+                        # Remove " at usb-..." suffix
+                        name = first_line.split(" at usb")[0].strip()
+                        if name:
+                            return name
+                    except (IOError, OSError):
+                        pass
+
+                # Fallback: use card ID
+                id_file = Path(card_path) / "id"
+                if id_file.exists():
+                    try:
+                        return id_file.read_text().strip()
+                    except (IOError, OSError):
+                        pass
+
+        return "USB Audio"
+
+    def get_jack_latency_info(self) -> str:
+        """Get JACK latency info (buffer size, sample rate, periods)."""
+        buffer_size = None
+        sample_rate = None
+        periods = None
+
+        # Get buffer size from JACK
+        try:
+            result = subprocess.run(
+                ["jack_bufsize"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                buffer_size = int(result.stdout.strip())
+        except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+            pass
+
+        # Get sample rate from JACK
+        try:
+            result = subprocess.run(
+                ["jack_samplerate"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                sample_rate = int(result.stdout.strip())
+        except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+            pass
+
+        # Get periods from ALSA hw_params
+        for hw_params in glob.glob("/proc/asound/card*/pcm*/sub*/hw_params"):
+            try:
+                content = Path(hw_params).read_text()
+                if "closed" in content:
+                    continue
+                period_size = None
+                alsa_buffer_size = None
+                for line in content.split('\n'):
+                    if line.startswith("period_size:"):
+                        period_size = int(line.split(':')[1].strip())
+                    elif line.startswith("buffer_size:"):
+                        alsa_buffer_size = int(line.split(':')[1].strip())
+                if period_size and alsa_buffer_size:
+                    periods = alsa_buffer_size // period_size
+                    break
+            except (IOError, OSError, ValueError):
+                pass
+
+        # Format output
+        if buffer_size and sample_rate:
+            latency_ms = (buffer_size / sample_rate) * 1000
+            if periods and periods > 1:
+                return f"{buffer_size}@{sample_rate}Hz, {periods}p ({latency_ms:.1f}ms)"
+            else:
+                return f"{buffer_size}@{sample_rate}Hz ({latency_ms:.1f}ms)"
+        elif buffer_size:
+            return f"{buffer_size} samples"
+
+        # Fallback: check if JACK is running
+        try:
+            result = subprocess.run(
+                ["jack_lsp"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0:
+                return "Active"
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+        return ""
+
     # Keep old method name for compatibility
     def check_motu_connected(self) -> bool:
         """Alias for check_audio_interface_connected (backward compatibility)."""
@@ -203,36 +318,32 @@ class AudioOptimizerTray(QSystemTrayIcon):
         - Gray: Audio Interface not connected
         """
         if not self.check_audio_interface_connected():
-            return f"{TRAY_NAME}\nKein Audio-Interface"
+            return f"{TRAY_NAME}\nNo Audio Interface"
 
+        interface_name = self.get_interface_name()
         state_data = self.read_state_file()
         state = state_data.get("state", "connected")
         jack = state_data.get("jack", "inactive")
-        jack_settings = state_data.get("jack_settings", "")
-        xruns = state_data.get("xruns_30s", "0")
 
-        # Status line
+        # Status text
         if state == "optimized":
-            lines = [TRAY_NAME, "Optimiert"]
+            status_text = "Optimized"
         elif state == "warning":
-            lines = [TRAY_NAME, "Warnung - Xruns erkannt"]
+            status_text = "Warning"
         else:
-            lines = [TRAY_NAME, "Verbunden"]
+            status_text = "Connected"
 
-        # JACK status - check actual jack state, not jack_settings content
+        lines = [TRAY_NAME, f"{interface_name}: {status_text}"]
+
+        # JACK status with latency info
         if jack == "active":
-            # Clean up jack_settings (remove emoji prefix if present)
-            settings = jack_settings.replace("🎵 ", "").replace("🎵", "").strip()
-            if settings and settings.lower() not in ("inactive", "unknown", ""):
-                lines.append(f"JACK: {settings}")
+            latency_info = self.get_jack_latency_info()
+            if latency_info:
+                lines.append(f"JACK: {latency_info}")
             else:
-                lines.append("JACK: Aktiv")
+                lines.append("JACK: Active")
         else:
-            lines.append("JACK: Inaktiv")
-
-        # Xruns
-        if xruns and xruns != "0":
-            lines.append(f"Xruns (30s): {xruns}")
+            lines.append("JACK: Inactive")
 
         return "\n".join(lines)
 
@@ -269,33 +380,33 @@ class AudioOptimizerTray(QSystemTrayIcon):
         menu = QMenu()
 
         # Status actions
-        action_status = QAction("Status anzeigen", menu)
+        action_status = QAction("Show Status", menu)
         action_status.triggered.connect(self.action_status)
         menu.addAction(action_status)
 
-        action_live = QAction("Live Xrun-Monitor", menu)
+        action_live = QAction("Live Xrun Monitor", menu)
         action_live.triggered.connect(self.action_live_monitor)
         menu.addAction(action_live)
 
-        action_daemon = QAction("Daemon-Monitor", menu)
+        action_daemon = QAction("Daemon Monitor", menu)
         action_daemon.triggered.connect(self.action_daemon_monitor)
         menu.addAction(action_daemon)
 
         menu.addSeparator()
 
         # Optimization actions
-        action_start = QAction("Optimierung starten", menu)
+        action_start = QAction("Start Optimization", menu)
         action_start.triggered.connect(self.action_start_optimization)
         menu.addAction(action_start)
 
-        action_stop = QAction("Optimierung stoppen", menu)
+        action_stop = QAction("Stop Optimization", menu)
         action_stop.triggered.connect(self.action_stop_optimization)
         menu.addAction(action_stop)
 
         menu.addSeparator()
 
         # Quit
-        action_quit = QAction("Beenden", menu)
+        action_quit = QAction("Quit", menu)
         action_quit.triggered.connect(QApplication.quit)
         menu.addAction(action_quit)
 
@@ -330,7 +441,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
         terminal = self.find_terminal()
 
         if hold:
-            bash_cmd = f"{command}; echo; read -p 'Druecke Enter...'"
+            bash_cmd = f"{command}; echo; read -p 'Press Enter to close...'"
         else:
             bash_cmd = command
 
@@ -344,7 +455,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
         try:
             subprocess.Popen(args)
         except subprocess.SubprocessError as e:
-            self.showMessage(TRAY_NAME, f"Terminal-Fehler: {e}", QSystemTrayIcon.Warning)
+            self.showMessage(TRAY_NAME, f"Terminal error: {e}", QSystemTrayIcon.Warning)
 
     def action_status(self):
         """Show status in terminal."""
@@ -362,17 +473,17 @@ class AudioOptimizerTray(QSystemTrayIcon):
         """Start optimization (requires root)."""
         try:
             subprocess.Popen(["pkexec", OPTIMIZER_CMD, "once"])
-            self.showMessage(TRAY_NAME, "Optimierung gestartet", QSystemTrayIcon.Information)
+            self.showMessage(TRAY_NAME, "Optimization started", QSystemTrayIcon.Information)
         except subprocess.SubprocessError as e:
-            self.showMessage(TRAY_NAME, f"Fehler: {e}", QSystemTrayIcon.Warning)
+            self.showMessage(TRAY_NAME, f"Error: {e}", QSystemTrayIcon.Warning)
 
     def action_stop_optimization(self):
         """Stop optimization (requires root)."""
         try:
             subprocess.Popen(["pkexec", OPTIMIZER_CMD, "stop"])
-            self.showMessage(TRAY_NAME, "Optimierung gestoppt", QSystemTrayIcon.Information)
+            self.showMessage(TRAY_NAME, "Optimization stopped", QSystemTrayIcon.Information)
         except subprocess.SubprocessError as e:
-            self.showMessage(TRAY_NAME, f"Fehler: {e}", QSystemTrayIcon.Warning)
+            self.showMessage(TRAY_NAME, f"Error: {e}", QSystemTrayIcon.Warning)
 
 
 def show_help():
@@ -390,12 +501,12 @@ Description:
   Realtime Audio Optimizer. Right-click the icon for quick actions.
 
 Menu Options:
-  - Status anzeigen     : Show detailed status in terminal
-  - Live Xrun-Monitor   : Open live xrun monitoring
-  - Daemon-Monitor      : Open daemon monitoring (root)
-  - Optimierung starten : Activate audio optimizations
-  - Optimierung stoppen : Deactivate optimizations
-  - Beenden             : Close the tray icon
+  - Show Status        : Show detailed status in terminal
+  - Live Xrun Monitor  : Open live xrun monitoring
+  - Daemon Monitor     : Open daemon monitoring (root)
+  - Start Optimization : Activate audio optimizations
+  - Stop Optimization  : Deactivate optimizations
+  - Quit               : Close the tray icon
 
 Requirements:
   - python3-pyqt5 package

@@ -164,7 +164,7 @@ tray_notify_xrun() {
     fi
 
     if [ "$xrun_count" -gt 0 ]; then
-        tray_notify "audio interface Optimizer" "$xrun_count Xruns in den letzten 30 Sekunden" "dialog-warning"
+        tray_notify "Audio Optimizer" "$xrun_count xruns in the last 30 seconds" "dialog-warning"
     fi
 }
 
