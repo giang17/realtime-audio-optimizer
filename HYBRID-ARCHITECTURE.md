@@ -166,7 +166,11 @@ sudo rm /etc/udev/rules.d/99-realtime-audio-optimizer.rules
 sudo udevadm control --reload-rules
 ```
 
-## GRUB Parameters for Best Performance
+## Kernel Isolation for Ultra-Low Latency
+
+The key to achieving ultra-low latency (even 32 samples / 0.7ms!) lies in kernel-level CPU isolation. This ensures the IRQ-handling CPUs are completely free from scheduler interference.
+
+### GRUB Parameters
 
 ```bash
 # /etc/default/grub
@@ -176,6 +180,33 @@ GRUB_CMDLINE_LINUX="isolcpus=14-19 nohz_full=14-19 rcu_nocbs=14-19 threadirqs"
 sudo update-grub
 sudo reboot
 ```
+
+### Why This Works
+
+| Parameter | Effect | Benefit |
+|-----------|--------|---------|
+| `isolcpus=14-19` | Isolates CPUs from general scheduler | IRQ CPUs are exclusively reserved |
+| `nohz_full=14-19` | Disables timer ticks on isolated CPUs | Zero interruptions from timer |
+| `rcu_nocbs=14-19` | Offloads RCU callbacks to other CPUs | No latency spikes from kernel housekeeping |
+| `threadirqs` | Enables threaded IRQ handlers | Allows RT priority for IRQ processing |
+
+### The Result
+
+With kernel isolation, even extreme latencies become possible:
+
+- **32 samples @ 48kHz = 0.7ms** latency with Yoshimi – every microsecond counts at these latencies
+- **128 samples @ 48kHz = 2.7ms** latency for complex instruments like Organteq with 35+ registers
+- IRQ processing is essentially "guaranteed" – no scheduler interference
+
+![Organteq Demo](organteq.png)
+*Organteq MIDI demo with 35 organ registers – live performance at 128 samples / 48kHz. nmon shows P-Cores under load while E-Cores (CPUs 14-19) remain idle, reserved exclusively for IRQ handling.*
+
+### Without Kernel Isolation
+
+The optimizer still works without these parameters, but:
+- IRQ CPUs may occasionally receive other tasks
+- Lowest latencies (< 64 samples) become unreliable
+- Xruns may occur during CPU-intensive background activity
 
 ## FAQ
 

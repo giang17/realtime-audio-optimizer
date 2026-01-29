@@ -77,9 +77,12 @@ The optimizer automatically activates when a USB audio interface is connected vi
 rt-audio-tray
 ```
 
-## CPU Strategy (Intel 12th/13th Gen Hybrid)
+## CPU Strategy (Intel 12th/13th/14th Gen Hybrid)
 
-The optimizer uses a hybrid strategy optimized for Intel Alder Lake / Raptor Lake CPUs:
+The optimizer uses a hybrid strategy optimized for Intel Alder Lake / Raptor Lake / Arrow Lake CPUs:
+
+![Organteq Demo](organteq.png)
+*Organteq MIDI demo with 35 organ registers – live performance at 128 samples / 48kHz. nmon shows P-Cores under load while E-Cores remain idle for IRQ handling.*
 
 | CPU Range | Type | Governor | Purpose |
 |-----------|------|----------|---------|
