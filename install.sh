@@ -199,211 +199,11 @@ uninstall_tray_components() {
 }
 
 # ============================================================================
-# MIGRATION FROM OLD MOTU M4 OPTIMIZER
+# WRAPPER SCRIPT GENERATION
 # ============================================================================
 
-# Old installation paths (motu-m4-dynamic-optimizer)
-OLD_SCRIPT_NAME="motu-m4-dynamic-optimizer"
-OLD_INSTALL_BIN="/usr/local/bin"
-OLD_SYSTEMD_DIR="/etc/systemd/system"
-OLD_UDEV_DIR="/etc/udev/rules.d"
-OLD_CONFIG_FILE="/etc/motu-m4-optimizer.conf"
-OLD_CONFIG_EXAMPLE="/etc/motu-m4-optimizer.conf.example"
-OLD_TRAY_SCRIPT="/usr/local/bin/motu-m4-tray"
-OLD_TRAY_DESKTOP="/usr/share/applications/motu-m4-tray.desktop"
-OLD_TRAY_ICONS="/usr/share/icons/motu-m4"
-
-# Check if old installation exists
-check_old_installation() {
-    local found=false
-
-    [ -f "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh" ] && found=true
-    [ -f "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}" ] && found=true
-    [ -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service" ] && found=true
-    [ -f "${OLD_UDEV_DIR}/99-motu-m4-audio-optimizer.rules" ] && found=true
-    [ -f "$OLD_CONFIG_FILE" ] && found=true
-    [ -f "$OLD_TRAY_SCRIPT" ] && found=true
-    [ -f "$OLD_TRAY_DESKTOP" ] && found=true
-    [ -d "$OLD_TRAY_ICONS" ] && found=true
-
-    echo "$found"
-}
-
-# Create backup of old installation
-backup_old_installation() {
-    local backup_dir="/var/backup/motu-m4-optimizer-$(date +%Y%m%d_%H%M%S)"
-
-    print_step "Creating backup of old installation..."
-    mkdir -p "$backup_dir"
-
-    # Backup scripts
-    [ -f "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh" ] && \
-        cp "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh" "$backup_dir/" 2>/dev/null
-    [ -f "$OLD_TRAY_SCRIPT" ] && \
-        cp "$OLD_TRAY_SCRIPT" "$backup_dir/" 2>/dev/null
-
-    # Backup tray desktop entry
-    [ -f "$OLD_TRAY_DESKTOP" ] && \
-        cp "$OLD_TRAY_DESKTOP" "$backup_dir/" 2>/dev/null
-
-    # Backup services
-    [ -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service" ] && \
-        cp "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service" "$backup_dir/" 2>/dev/null
-    [ -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}-delayed.service" ] && \
-        cp "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}-delayed.service" "$backup_dir/" 2>/dev/null
-
-    # Backup udev rules
-    for rules_file in "${OLD_UDEV_DIR}"/99-motu-m4-audio-optimizer.rules*; do
-        [ -f "$rules_file" ] && cp "$rules_file" "$backup_dir/" 2>/dev/null
-    done
-
-    # Backup config
-    [ -f "$OLD_CONFIG_FILE" ] && \
-        cp "$OLD_CONFIG_FILE" "$backup_dir/" 2>/dev/null
-    [ -f "$OLD_CONFIG_EXAMPLE" ] && \
-        cp "$OLD_CONFIG_EXAMPLE" "$backup_dir/" 2>/dev/null
-
-    print_success "Backup created: $backup_dir"
-    echo "$backup_dir"
-}
-
-# Remove old installation
-remove_old_installation() {
-    print_step "Removing old MOTU M4 optimizer installation..."
-
-    # Stop and disable old services
-    systemctl stop "${OLD_SCRIPT_NAME}.service" 2>/dev/null || true
-    systemctl stop "${OLD_SCRIPT_NAME}-delayed.service" 2>/dev/null || true
-    systemctl disable "${OLD_SCRIPT_NAME}.service" 2>/dev/null || true
-    systemctl disable "${OLD_SCRIPT_NAME}-delayed.service" 2>/dev/null || true
-    print_success "Old services stopped and disabled"
-
-    # Remove old scripts
-    rm -f "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh"
-    rm -f "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh.backup"*
-    rm -f "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}"
-    rm -f "$OLD_TRAY_SCRIPT"
-    print_success "Old scripts removed"
-
-    # Remove old tray desktop entry and icons
-    rm -f "$OLD_TRAY_DESKTOP"
-    rm -rf "$OLD_TRAY_ICONS"
-    print_success "Old tray components removed"
-
-    # Remove old services
-    rm -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service"
-    rm -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}-delayed.service"
-    print_success "Old service files removed"
-
-    # Remove old udev rules (including backups)
-    rm -f "${OLD_UDEV_DIR}/99-motu-m4-audio-optimizer.rules"
-    rm -f "${OLD_UDEV_DIR}/99-motu-m4-audio-optimizer.rules.backup"*
-    print_success "Old udev rules removed"
-
-    # Remove old config example (keep user config for reference)
-    rm -f "$OLD_CONFIG_EXAMPLE"
-
-    # Reload daemons
-    systemctl daemon-reload
-    udevadm control --reload-rules 2>/dev/null || true
-
-    print_success "Old MOTU M4 optimizer removed"
-}
-
-# Migrate from old installation
-migrate_from_motu_m4() {
-    local old_exists
-    old_exists=$(check_old_installation)
-
-    if [ "$old_exists" = "true" ]; then
-        echo ""
-        print_warning "Old MOTU M4 optimizer installation detected!"
-        echo ""
-        echo "  Found components:"
-        [ -f "${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh" ] && echo "    - Script: ${OLD_INSTALL_BIN}/${OLD_SCRIPT_NAME}.sh"
-        [ -f "${OLD_SYSTEMD_DIR}/${OLD_SCRIPT_NAME}.service" ] && echo "    - Service: ${OLD_SCRIPT_NAME}.service"
-        [ -f "${OLD_UDEV_DIR}/99-motu-m4-audio-optimizer.rules" ] && echo "    - Udev rules: 99-motu-m4-audio-optimizer.rules"
-        [ -f "$OLD_CONFIG_FILE" ] && echo "    - Config: $OLD_CONFIG_FILE"
-        [ -f "$OLD_TRAY_SCRIPT" ] && echo "    - Tray script: $OLD_TRAY_SCRIPT"
-        [ -f "$OLD_TRAY_DESKTOP" ] && echo "    - Tray desktop: $OLD_TRAY_DESKTOP"
-        [ -d "$OLD_TRAY_ICONS" ] && echo "    - Tray icons: $OLD_TRAY_ICONS"
-        echo ""
-
-        read -p "Do you want to migrate to the new generic optimizer? [Y/n] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-            # Create backup
-            local backup_dir
-            backup_dir=$(backup_old_installation)
-
-            # Remove old installation
-            remove_old_installation
-
-            echo ""
-            print_success "Migration preparation complete!"
-            print_info "Old configuration backed up to: $backup_dir"
-
-            # Check if old config had custom settings
-            if [ -f "$backup_dir/motu-m4-optimizer.conf" ]; then
-                print_info "Your old settings were saved. You may want to transfer them to:"
-                print_info "  /etc/realtime-audio-optimizer.conf"
-            fi
-            echo ""
-
-            return 0
-        else
-            print_warning "Migration cancelled. Old installation will remain."
-            echo ""
-            read -p "Continue with parallel installation? [y/N] " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                print_info "Installation cancelled."
-                exit 0
-            fi
-        fi
-    fi
-
-    return 0
-}
-
-# ============================================================================
-# INSTALLATION
-# ============================================================================
-
-do_install() {
-    print_header
-    check_root "install"
-    check_source_files
-
-    # Check for old MOTU M4 optimizer and offer migration
-    migrate_from_motu_m4
-
-    echo ""
-    print_info "Installing Realtime Audio Optimizer..."
-    echo ""
-
-    # Stop existing service if running
-    if systemctl is-active --quiet "${SCRIPT_NAME}.service" 2>/dev/null; then
-        print_step "Stopping existing service..."
-        systemctl stop "${SCRIPT_NAME}.service" 2>/dev/null || true
-        print_success "Service stopped"
-    fi
-
-    # Create library directory
-    print_step "Creating library directory..."
-    mkdir -p "$INSTALL_LIB"
-    print_success "Created $INSTALL_LIB"
-
-    # Copy library modules
-    print_step "Installing library modules..."
-    cp -r "${LIB_DIR}/"*.sh "$INSTALL_LIB/"
-    chmod 644 "${INSTALL_LIB}/"*.sh
-    print_success "Installed $(ls -1 "${INSTALL_LIB}/"*.sh | wc -l) modules to $INSTALL_LIB"
-
-    # Create wrapper script that uses installed library
-    print_step "Installing main script..."
-
-    # Create a modified version that points to installed lib location
+# Generate the wrapper script (used by both install and update)
+generate_wrapper_script() {
     cat > "${INSTALL_BIN}/${SCRIPT_NAME}.sh" << 'WRAPPER_EOF'
 #!/bin/bash
 
@@ -558,6 +358,42 @@ esac
 WRAPPER_EOF
 
     chmod +x "${INSTALL_BIN}/${SCRIPT_NAME}.sh"
+}
+
+# ============================================================================
+# INSTALLATION
+# ============================================================================
+
+do_install() {
+    print_header
+    check_root "install"
+    check_source_files
+
+    echo ""
+    print_info "Installing Realtime Audio Optimizer..."
+    echo ""
+
+    # Stop existing service if running
+    if systemctl is-active --quiet "${SCRIPT_NAME}.service" 2>/dev/null; then
+        print_step "Stopping existing service..."
+        systemctl stop "${SCRIPT_NAME}.service" 2>/dev/null || true
+        print_success "Service stopped"
+    fi
+
+    # Create library directory
+    print_step "Creating library directory..."
+    mkdir -p "$INSTALL_LIB"
+    print_success "Created $INSTALL_LIB"
+
+    # Copy library modules
+    print_step "Installing library modules..."
+    cp -r "${LIB_DIR}/"*.sh "$INSTALL_LIB/"
+    chmod 644 "${INSTALL_LIB}/"*.sh
+    print_success "Installed $(ls -1 "${INSTALL_LIB}/"*.sh | wc -l) modules to $INSTALL_LIB"
+
+    # Create wrapper script that uses installed library
+    print_step "Installing main script..."
+    generate_wrapper_script
     print_success "Installed main script to ${INSTALL_BIN}/${SCRIPT_NAME}.sh"
 
     # Create symlink without .sh extension for convenience
@@ -772,8 +608,7 @@ do_update() {
 
     # Update main script (regenerate wrapper)
     print_step "Updating main script..."
-    # Re-run the install to regenerate the wrapper script
-    do_install > /dev/null 2>&1 || true
+    generate_wrapper_script
     print_success "Updated main script"
 
     # Reload daemons
