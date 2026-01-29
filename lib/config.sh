@@ -161,6 +161,9 @@ AUDIO_PROCESSES=(
     "renoise"
     "FL64.exe"
     "EZmix 3.exe"
+    "Kontakt.exe"
+    "Kontakt 7.exe"
+    "UVIWorkstationx"
 
     # Synthesizers and sound generators (DAW_CPUS + RT priority 70)
     "yoshimi"
@@ -177,7 +180,7 @@ AUDIO_PROCESSES=(
     "Polisix.exe"
     "EP-1.exe"
     "VOX Super Conti"
-    "legacycell.exe"
+    "LegacyCell.exe"
     "wavestate nativ"
     "WAVESTATION.exe"
     "opsix_native.ex"
@@ -189,6 +192,8 @@ AUDIO_PROCESSES=(
     "EZbass.exe"
     "AAS Player.exe"
     "Lounge Lizard S"
+    "CFX Lite x64,ex"
+    "CFX Concert Gra"
 
     # Drums and percussion (DAW_CPUS + RT priority 70)
     "hydrogen"
