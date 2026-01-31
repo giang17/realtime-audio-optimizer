@@ -17,16 +17,16 @@ The tray icon reads status from /var/run/rt-audio-tray-state
 which is written by the main optimizer service.
 """
 
-import os
-import sys
 import glob
+import os
 import subprocess
+import sys
 from pathlib import Path
 
-from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
-from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QPen, QCursor
-from PyQt5.QtCore import QTimer, Qt, QRectF
+from PyQt5.QtCore import QRectF, Qt, QTimer
+from PyQt5.QtGui import QBrush, QColor, QCursor, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtSvg import QSvgRenderer
+from PyQt5.QtWidgets import QAction, QApplication, QMenu, QSystemTrayIcon
 
 # Configuration
 TRAY_NAME = "Realtime Audio Optimizer"
@@ -170,7 +170,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
                 # Try to get friendly name from stream0
                 if stream0_file.exists():
                     try:
-                        first_line = stream0_file.read_text().split('\n')[0]
+                        first_line = stream0_file.read_text().split("\n")[0]
                         # Remove " at usb-..." suffix
                         name = first_line.split(" at usb")[0].strip()
                         if name:
@@ -197,10 +197,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
         # Get buffer size from JACK
         try:
             result = subprocess.run(
-                ["jack_bufsize"],
-                capture_output=True,
-                text=True,
-                timeout=2
+                ["jack_bufsize"], capture_output=True, text=True, timeout=2
             )
             if result.returncode == 0:
                 buffer_size = int(result.stdout.strip())
@@ -210,10 +207,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
         # Get sample rate from JACK
         try:
             result = subprocess.run(
-                ["jack_samplerate"],
-                capture_output=True,
-                text=True,
-                timeout=2
+                ["jack_samplerate"], capture_output=True, text=True, timeout=2
             )
             if result.returncode == 0:
                 sample_rate = int(result.stdout.strip())
@@ -228,11 +222,11 @@ class AudioOptimizerTray(QSystemTrayIcon):
                     continue
                 period_size = None
                 alsa_buffer_size = None
-                for line in content.split('\n'):
+                for line in content.split("\n"):
                     if line.startswith("period_size:"):
-                        period_size = int(line.split(':')[1].strip())
+                        period_size = int(line.split(":")[1].strip())
                     elif line.startswith("buffer_size:"):
-                        alsa_buffer_size = int(line.split(':')[1].strip())
+                        alsa_buffer_size = int(line.split(":")[1].strip())
                 if period_size and alsa_buffer_size:
                     periods = alsa_buffer_size // period_size
                     break
@@ -252,10 +246,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
         # Fallback: check if JACK is running
         try:
             result = subprocess.run(
-                ["jack_lsp"],
-                capture_output=True,
-                text=True,
-                timeout=2
+                ["jack_lsp"], capture_output=True, text=True, timeout=2
             )
             if result.returncode == 0:
                 return "Active"
@@ -275,7 +266,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
             "state": "connected",
             "jack": "inactive",
             "jack_settings": "unknown",
-            "xruns_30s": "0"
+            "xruns_30s": "0",
         }
 
         if not os.path.exists(STATE_FILE):
@@ -308,42 +299,52 @@ class AudioOptimizerTray(QSystemTrayIcon):
         else:
             return load_svg_icon(ICON_CONNECTED, "blue")
 
+    def check_jack_running(self) -> bool:
+        """Check if JACK server is actually running."""
+        try:
+            result = subprocess.run(
+                ["jack_lsp"], capture_output=True, text=True, timeout=2
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return False
+
     def get_tooltip(self) -> str:
         """Generate tooltip text based on current status.
 
-        Icon colors indicate status:
-        - Green: Audio Interface connected and optimized
-        - Blue: Audio Interface connected but not optimized
-        - Orange: Warning (xruns detected)
-        - Gray: Audio Interface not connected
+        Format similar to terminal status output:
+        🎛️  Audio Interface detected: true/false
+        🔄 Current state: optimized/standard
+        🎵 JACK Status: Active/Inactive (latency info)
         """
-        if not self.check_audio_interface_connected():
-            return f"{TRAY_NAME}\nNo Audio Interface"
-
-        interface_name = self.get_interface_name()
+        interface_connected = self.check_audio_interface_connected()
         state_data = self.read_state_file()
         state = state_data.get("state", "connected")
-        jack = state_data.get("jack", "inactive")
 
-        # Status text
+        lines = [f"=== {TRAY_NAME} ==="]
+
+        # Audio interface status (like terminal: "audio interface detected: true/false")
+        if interface_connected:
+            lines.append("Audio Interface detected: true")
+        else:
+            lines.append("Audio Interface detected: false")
+
+        # Current state
         if state == "optimized":
-            status_text = "Optimized"
-        elif state == "warning":
-            status_text = "Warning"
+            lines.append("Current state: optimized")
         else:
-            status_text = "Connected"
+            lines.append("Current state: standard")
 
-        lines = [TRAY_NAME, f"{interface_name}: {status_text}"]
-
-        # JACK status with latency info
-        if jack == "active":
+        # JACK status - check actual JACK status, not just state file
+        jack_running = self.check_jack_running()
+        if jack_running:
             latency_info = self.get_jack_latency_info()
-            if latency_info:
-                lines.append(f"JACK: {latency_info}")
+            if latency_info and latency_info != "Active":
+                lines.append(f"JACK Status: Active ({latency_info})")
             else:
-                lines.append("JACK: Active")
+                lines.append("JACK Status: Active")
         else:
-            lines.append("JACK: Inactive")
+            lines.append("JACK Status: Inactive")
 
         return "\n".join(lines)
 
@@ -351,11 +352,18 @@ class AudioOptimizerTray(QSystemTrayIcon):
         """Update tray icon and tooltip."""
         interface_connected = self.check_audio_interface_connected()
         state_data = self.read_state_file()
-        current_state = state_data.get("state", "connected") if interface_connected else "disconnected"
+        current_state = (
+            state_data.get("state", "connected")
+            if interface_connected
+            else "disconnected"
+        )
         current_xruns = state_data.get("xruns_30s", "0")
 
         # Update icon if state changed
-        if interface_connected != self.last_motu_connected or current_state != self.last_state:
+        if (
+            interface_connected != self.last_motu_connected
+            or current_state != self.last_state
+        ):
             self.setIcon(self.get_current_icon())
             self.setToolTip(self.get_tooltip())
             self.last_motu_connected = interface_connected
@@ -425,11 +433,7 @@ class AudioOptimizerTray(QSystemTrayIcon):
         terminals = ["x-terminal-emulator", "konsole", "gnome-terminal", "xterm"]
         for term in terminals:
             try:
-                result = subprocess.run(
-                    ["which", term],
-                    capture_output=True,
-                    timeout=2
-                )
+                result = subprocess.run(["which", term], capture_output=True, timeout=2)
                 if result.returncode == 0:
                     return term
             except subprocess.SubprocessError:
@@ -473,7 +477,9 @@ class AudioOptimizerTray(QSystemTrayIcon):
         """Start optimization (requires root)."""
         try:
             subprocess.Popen(["pkexec", OPTIMIZER_CMD, "once"])
-            self.showMessage(TRAY_NAME, "Optimization started", QSystemTrayIcon.Information)
+            self.showMessage(
+                TRAY_NAME, "Optimization started", QSystemTrayIcon.Information
+            )
         except subprocess.SubprocessError as e:
             self.showMessage(TRAY_NAME, f"Error: {e}", QSystemTrayIcon.Warning)
 
@@ -481,7 +487,9 @@ class AudioOptimizerTray(QSystemTrayIcon):
         """Stop optimization (requires root)."""
         try:
             subprocess.Popen(["pkexec", OPTIMIZER_CMD, "stop"])
-            self.showMessage(TRAY_NAME, "Optimization stopped", QSystemTrayIcon.Information)
+            self.showMessage(
+                TRAY_NAME, "Optimization stopped", QSystemTrayIcon.Information
+            )
         except subprocess.SubprocessError as e:
             self.showMessage(TRAY_NAME, f"Error: {e}", QSystemTrayIcon.Warning)
 
