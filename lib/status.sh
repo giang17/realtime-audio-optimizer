@@ -515,17 +515,14 @@ _show_usb_irq_status() {
         local irq
         irq=$(echo "$line" | awk '{print $1}' | tr -d ':')
         if [ -e "/proc/irq/$irq/smp_affinity_list" ]; then
-            local affinity threading balance balance_text
+            local affinity threading
             affinity=$(cat "/proc/irq/$irq/smp_affinity_list")
             threading=$(cat "/proc/irq/$irq/threading" 2>/dev/null || echo "standard")
-            balance=$(cat "/proc/irq/$irq/balance_disabled" 2>/dev/null || echo "0")
-            balance_text="enabled"
-            [ "$balance" = "1" ] && balance_text="disabled"
 
             local status_icon="✅"
             [ "$affinity" != "$IRQ_CPUS" ] && status_icon="⚠️"
 
-            echo "   $status_icon IRQ $irq: CPUs $affinity, Threading: $threading, Balance: $balance_text"
+            echo "   $status_icon IRQ $irq: CPUs $affinity, Threading: $threading"
         fi
     done
 }
@@ -537,16 +534,13 @@ _show_audio_irq_status() {
         local irq
         irq=$(echo "$line" | awk '{print $1}' | tr -d ':')
         if [ -e "/proc/irq/$irq/smp_affinity_list" ]; then
-            local affinity balance balance_text
+            local affinity
             affinity=$(cat "/proc/irq/$irq/smp_affinity_list")
-            balance=$(cat "/proc/irq/$irq/balance_disabled" 2>/dev/null || echo "0")
-            balance_text="enabled"
-            [ "$balance" = "1" ] && balance_text="disabled"
 
             local status_icon="✅"
             [ "$affinity" != "$IRQ_CPUS" ] && status_icon="⚠️"
 
-            echo "   $status_icon Audio IRQ $irq: CPUs $affinity, Balance: $balance_text"
+            echo "   $status_icon Audio IRQ $irq: CPUs $affinity"
         fi
     done
 }

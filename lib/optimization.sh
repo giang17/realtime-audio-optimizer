@@ -67,6 +67,9 @@ activate_audio_optimizations() {
     # IRQ E-Cores to Performance (14-19)
     _optimize_irq_e_cores
 
+    # Defense in depth: ban RT IRQ CPUs from irqbalance (if ever started)
+    _ensure_irqbalance_banned_cpus
+
     # Set USB controller IRQs to E-Cores
     _optimize_usb_irqs
 
@@ -243,11 +246,6 @@ _optimize_usb_irqs() {
             if [ -e "/proc/irq/$irq/threading" ]; then
                 echo "forced" > "/proc/irq/$irq/threading" 2>/dev/null
             fi
-
-            # Disable IRQ balancing for this IRQ
-            if [ -e "/proc/irq/$irq/balance_disabled" ]; then
-                echo 1 > "/proc/irq/$irq/balance_disabled" 2>/dev/null
-            fi
         fi
     done
 
@@ -286,11 +284,6 @@ _optimize_audio_irqs() {
                     log_debug "  Audio IRQ $irq set to CPUs $irq_cpus (was: $current_affinity)"
                 fi
             fi
-
-            # Disable IRQ balance for audio IRQs
-            if [ -e "/proc/irq/$irq/balance_disabled" ]; then
-                echo 1 > "/proc/irq/$irq/balance_disabled" 2>/dev/null
-            fi
         fi
     done
 }
@@ -304,11 +297,6 @@ _reset_usb_irqs() {
         if [ -e "/proc/irq/$irq/smp_affinity_list" ]; then
             if echo "$ALL_CPUS" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
                 log_debug "  USB controller IRQ $irq reset to all CPUs ($ALL_CPUS)"
-            fi
-
-            # Re-enable IRQ balancing
-            if [ -e "/proc/irq/$irq/balance_disabled" ]; then
-                echo 0 > "/proc/irq/$irq/balance_disabled" 2>/dev/null
             fi
         fi
     done
@@ -324,13 +312,78 @@ _reset_audio_irqs() {
             if echo "$ALL_CPUS" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
                 log_debug "  Audio IRQ $irq reset to all CPUs ($ALL_CPUS)"
             fi
-
-            # Re-enable IRQ balancing
-            if [ -e "/proc/irq/$irq/balance_disabled" ]; then
-                echo 0 > "/proc/irq/$irq/balance_disabled" 2>/dev/null
-            fi
         fi
     done
+}
+
+# ----------------------------------------------------------------------------
+# irqbalance ban list (defense in depth)
+# ----------------------------------------------------------------------------
+
+# Convert "14-19" or "14,16-19" to a hex CPU mask string (e.g. "fc000").
+# Returns non-zero if input yields no bits set.
+_cpulist_to_hexmask() {
+    local input="$1"
+    local mask=0 part start end i
+    for part in $(echo "$input" | tr ',' ' '); do
+        if [[ "$part" == *-* ]]; then
+            start="${part%-*}"
+            end="${part#*-}"
+            case "$start$end" in
+                *[!0-9]*) continue ;;
+            esac
+            for ((i = start; i <= end; i++)); do
+                mask=$((mask | (1 << i)))
+            done
+        else
+            case "$part" in
+                '' | *[!0-9]*) continue ;;
+            esac
+            mask=$((mask | (1 << part)))
+        fi
+    done
+    [ "$mask" -eq 0 ] && return 1
+    printf '%x\n' "$mask"
+    return 0
+}
+
+# Write IRQBALANCE_BANNED_CPUS to /etc/default/irqbalance so that if irqbalance
+# is ever (re-)enabled it will leave our RT IRQ CPUs alone. This complements
+# the direct smp_affinity_list pinning — the kernel offers no userspace-writable
+# per-IRQ "do not rebalance" flag on mainline, so this is the best defense.
+_ensure_irqbalance_banned_cpus() {
+    local config_file="/etc/default/irqbalance"
+
+    local irq_cpus
+    irq_cpus=$(get_effective_irq_cpus 2>/dev/null || echo "$IRQ_CPUS")
+    [ -z "$irq_cpus" ] && return 0
+
+    local mask
+    mask=$(_cpulist_to_hexmask "$irq_cpus") || return 0
+
+    local new_line="IRQBALANCE_BANNED_CPUS=\"$mask\""
+
+    if [ ! -f "$config_file" ]; then
+        echo "$new_line" > "$config_file" 2>/dev/null || return 0
+        log_info "  Created $config_file with IRQBALANCE_BANNED_CPUS=$mask"
+        return 0
+    fi
+
+    local current
+    current=$(grep -E "^IRQBALANCE_BANNED_CPUS=" "$config_file" 2>/dev/null \
+              | tail -n1 | cut -d= -f2- | tr -d '"')
+
+    if [ "$current" = "$mask" ]; then
+        return 0
+    fi
+
+    if grep -qE "^IRQBALANCE_BANNED_CPUS=" "$config_file"; then
+        sed -i -E "s|^IRQBALANCE_BANNED_CPUS=.*|$new_line|" "$config_file" 2>/dev/null \
+            && log_info "  Updated IRQBALANCE_BANNED_CPUS=$mask in $config_file (was: ${current:-unset})"
+    else
+        echo "$new_line" >> "$config_file" 2>/dev/null \
+            && log_info "  Added IRQBALANCE_BANNED_CPUS=$mask to $config_file"
+    fi
 }
 
 # ============================================================================
