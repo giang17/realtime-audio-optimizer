@@ -226,15 +226,17 @@ _reset_cpu_governors() {
 
 # Optimize USB controller IRQs
 _optimize_usb_irqs() {
-    log_info "USB controller IRQs to E-Cores (14-19) for stable latency..."
+    local irq_cpus
+    irq_cpus=$(get_effective_irq_cpus 2>/dev/null || echo "$IRQ_CPUS")
+    log_info "USB controller IRQs to IRQ CPUs ($irq_cpus) for stable latency..."
 
     local usb_irqs
     usb_irqs=$(get_usb_irqs)
 
     for irq in $usb_irqs; do
         if [ -e "/proc/irq/$irq/smp_affinity_list" ]; then
-            if echo "$IRQ_CPUS" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
-                log_debug "  USB controller IRQ $irq set to E-Cores $IRQ_CPUS"
+            if echo "$irq_cpus" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
+                log_debug "  USB controller IRQ $irq set to CPUs $irq_cpus"
             fi
 
             # IRQ optimizations: Force threading
@@ -252,8 +254,8 @@ _optimize_usb_irqs() {
     # Fallback for known IRQs (common USB controller IRQs)
     for irq in 156 176; do
         if [ -e "/proc/irq/$irq/smp_affinity_list" ]; then
-            if echo "$IRQ_CPUS" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
-                log_debug "  Fallback: IRQ $irq set to E-Cores $IRQ_CPUS"
+            if echo "$irq_cpus" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
+                log_debug "  Fallback: IRQ $irq set to CPUs $irq_cpus"
             fi
         fi
     done
@@ -261,18 +263,27 @@ _optimize_usb_irqs() {
 
 # Optimize audio-related IRQs
 _optimize_audio_irqs() {
-    log_info "Audio IRQs to E-Cores (14-19) for optimal latency..."
+    local irq_cpus
+    irq_cpus=$(get_effective_irq_cpus 2>/dev/null || echo "$IRQ_CPUS")
+    log_info "Audio IRQs to IRQ CPUs ($irq_cpus) for optimal latency..."
 
-    local audio_irqs
-    audio_irqs=$(get_audio_irqs)
+    # Prefer dynamic detection via sysfs (detect_audio_irqs), fall back
+    # to /proc/interrupts parsing (get_audio_irqs) for backward compatibility.
+    local audio_irqs=""
+    if declare -f detect_audio_irqs >/dev/null 2>&1; then
+        audio_irqs=$(detect_audio_irqs)
+    fi
+    if [ -z "${audio_irqs// }" ]; then
+        audio_irqs=$(get_audio_irqs)
+    fi
 
     for irq in $audio_irqs; do
         if [ -e "/proc/irq/$irq/smp_affinity_list" ]; then
             local current_affinity
             current_affinity=$(cat "/proc/irq/$irq/smp_affinity_list")
-            if [ "$current_affinity" != "$IRQ_CPUS" ]; then
-                if echo "$IRQ_CPUS" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
-                    log_debug "  Audio IRQ $irq set to E-Cores $IRQ_CPUS (was: $current_affinity)"
+            if [ "$current_affinity" != "$irq_cpus" ]; then
+                if echo "$irq_cpus" > "/proc/irq/$irq/smp_affinity_list" 2>/dev/null; then
+                    log_debug "  Audio IRQ $irq set to CPUs $irq_cpus (was: $current_affinity)"
                 fi
             fi
 
@@ -331,6 +342,8 @@ count_optimized_usb_irqs() {
     local optimized=0
     local total=0
     local usb_irqs
+    local irq_cpus
+    irq_cpus=$(get_effective_irq_cpus 2>/dev/null || echo "$IRQ_CPUS")
 
     usb_irqs=$(get_usb_irqs)
 
@@ -339,7 +352,7 @@ count_optimized_usb_irqs() {
             total=$((total + 1))
             local affinity
             affinity=$(cat "/proc/irq/$irq/smp_affinity_list")
-            if [ "$affinity" = "$IRQ_CPUS" ]; then
+            if [ "$affinity" = "$irq_cpus" ]; then
                 optimized=$((optimized + 1))
             fi
         fi
@@ -353,6 +366,8 @@ count_optimized_audio_irqs() {
     local optimized=0
     local total=0
     local audio_irqs
+    local irq_cpus
+    irq_cpus=$(get_effective_irq_cpus 2>/dev/null || echo "$IRQ_CPUS")
 
     audio_irqs=$(get_audio_irqs)
 
@@ -361,7 +376,7 @@ count_optimized_audio_irqs() {
             total=$((total + 1))
             local affinity
             affinity=$(cat "/proc/irq/$irq/smp_affinity_list")
-            if [ "$affinity" = "$IRQ_CPUS" ]; then
+            if [ "$affinity" = "$irq_cpus" ]; then
                 optimized=$((optimized + 1))
             fi
         fi

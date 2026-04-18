@@ -22,6 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_BIN="/usr/local/bin"
 INSTALL_LIB="/usr/local/lib/${SCRIPT_NAME}"
 SYSTEMD_DIR="/etc/systemd/system"
+SYSTEMD_SLEEP_DIR="/usr/lib/systemd/system-sleep"
 UDEV_DIR="/etc/udev/rules.d"
 CONFIG_FILE="/etc/realtime-audio-optimizer.conf"
 LOG_FILE="/var/log/realtime-audio-optimizer.log"
@@ -33,6 +34,7 @@ SERVICE_FILE="${SCRIPT_DIR}/realtime-audio-optimizer.service"
 DELAYED_SERVICE_FILE="${SCRIPT_DIR}/realtime-audio-optimizer-delayed.service"
 UDEV_RULES="${SCRIPT_DIR}/99-realtime-audio-optimizer.rules"
 EXAMPLE_CONFIG="${SCRIPT_DIR}/realtime-audio-optimizer.conf.example"
+SLEEP_HOOK="${SCRIPT_DIR}/support/realtime-audio-optimizer.sleep"
 
 # Colors for output
 RED='\033[0;31m'
@@ -97,9 +99,9 @@ check_source_files() {
     else
         # Check for required modules
         local required_modules=(
-            "config.sh" "logging.sh" "interfaces.sh" "checks.sh" "jack.sh" "xrun.sh"
+            "config.sh" "logging.sh" "interfaces.sh" "checks.sh" "irqs.sh" "jack.sh" "xrun.sh"
             "process.sh" "usb.sh" "kernel.sh" "optimization.sh"
-            "status.sh" "monitor.sh"
+            "status.sh" "check.sh" "monitor.sh"
         )
         for module in "${required_modules[@]}"; do
             if [ ! -f "${LIB_DIR}/${module}" ]; then
@@ -226,9 +228,9 @@ fi
 
 # List of required modules in load order
 REQUIRED_MODULES=(
-    "config.sh" "logging.sh" "interfaces.sh" "checks.sh" "jack.sh" "xrun.sh"
+    "config.sh" "logging.sh" "interfaces.sh" "checks.sh" "irqs.sh" "jack.sh" "xrun.sh"
     "process.sh" "usb.sh" "kernel.sh" "optimization.sh"
-    "status.sh" "monitor.sh"
+    "status.sh" "check.sh" "monitor.sh"
 )
 
 # Optional modules (loaded if present)
@@ -257,7 +259,7 @@ done
 show_help() {
     echo "$OPTIMIZER_NAME v$OPTIMIZER_VERSION - $OPTIMIZER_STRATEGY"
     echo ""
-    echo "Usage: $0 [monitor|once|status|detailed|live-xruns|detect|stop]"
+    echo "Usage: $0 [monitor|once|status|detailed|live-xruns|detect|check|stop]"
     echo ""
     echo "Commands:"
     echo "  monitor     - Continuous monitoring (default)"
@@ -266,6 +268,7 @@ show_help() {
     echo "  detailed    - Detailed hardware monitoring"
     echo "  live-xruns  - Live xrun monitoring (real-time)"
     echo "  detect      - Detect connected USB audio interfaces"
+    echo "  check       - Read-only diagnosis (no changes made)"
     echo "  stop        - Deactivate optimizations"
     echo ""
     echo "Supported: All USB Audio Class compliant devices"
@@ -346,6 +349,10 @@ case "${1:-monitor}" in
     "detect"|"list"|"interfaces")
         show_detected_interfaces
         ;;
+    "check"|"diagnose")
+        show_check
+        exit $?
+        ;;
     "help"|"-h"|"--help")
         show_help
         exit 0
@@ -423,6 +430,16 @@ do_install() {
         cp "$UDEV_RULES" "${UDEV_DIR}/"
         chmod 644 "${UDEV_DIR}/99-realtime-audio-optimizer.rules"
         print_success "Installed udev rules"
+    fi
+
+    # Install systemd sleep/wake hook
+    if [ -f "$SLEEP_HOOK" ]; then
+        print_step "Installing systemd sleep/wake hook..."
+        mkdir -p "$SYSTEMD_SLEEP_DIR"
+        install -m 755 "$SLEEP_HOOK" "${SYSTEMD_SLEEP_DIR}/${SCRIPT_NAME}"
+        print_success "Installed sleep hook to ${SYSTEMD_SLEEP_DIR}/${SCRIPT_NAME}"
+    else
+        print_warning "Sleep hook not found: $SLEEP_HOOK (optional)"
     fi
 
     # Install example configuration file
@@ -525,6 +542,11 @@ do_uninstall() {
     rm -f "${UDEV_DIR}/99-realtime-audio-optimizer.rules"
     print_success "Removed udev rules"
 
+    # Remove systemd sleep/wake hook
+    print_step "Removing systemd sleep/wake hook..."
+    rm -f "${SYSTEMD_SLEEP_DIR}/${SCRIPT_NAME}"
+    print_success "Removed sleep hook"
+
     # Remove tray components
     uninstall_tray_components
 
@@ -610,6 +632,14 @@ do_update() {
     print_step "Updating main script..."
     generate_wrapper_script
     print_success "Updated main script"
+
+    # Update systemd sleep/wake hook if present
+    if [ -f "$SLEEP_HOOK" ]; then
+        print_step "Updating systemd sleep/wake hook..."
+        mkdir -p "$SYSTEMD_SLEEP_DIR"
+        install -m 755 "$SLEEP_HOOK" "${SYSTEMD_SLEEP_DIR}/${SCRIPT_NAME}"
+        print_success "Updated sleep hook"
+    fi
 
     # Reload daemons
     print_step "Reloading system daemons..."

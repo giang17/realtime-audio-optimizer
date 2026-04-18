@@ -14,6 +14,7 @@
 #   detailed    - Detailed hardware monitoring
 #   live-xruns  - Live xrun monitoring (real-time)
 #   detect      - Detect connected audio interfaces
+#   check       - Read-only diagnosis (no changes made)
 #   stop        - Deactivate optimizations
 
 # Note: Do NOT use "set -e" here - many operations may fail non-critically
@@ -44,6 +45,7 @@ REQUIRED_MODULES=(
     "logging.sh"      # Logging functions
     "interfaces.sh"   # Audio interface detection (NEW)
     "checks.sh"       # System detection functions
+    "irqs.sh"         # Dynamic IRQ detection & sharing warnings
     "jack.sh"         # JACK-related functions
     "xrun.sh"         # Xrun monitoring functions
     "process.sh"      # Process affinity management
@@ -51,6 +53,7 @@ REQUIRED_MODULES=(
     "kernel.sh"       # Kernel parameter optimization
     "optimization.sh" # Main optimization functions
     "status.sh"       # Status display functions
+    "check.sh"        # Read-only diagnosis (check command)
     "monitor.sh"      # Monitoring loops
 )
 
@@ -73,7 +76,7 @@ done
 show_help() {
     echo "$OPTIMIZER_NAME v$OPTIMIZER_VERSION - $OPTIMIZER_STRATEGY"
     echo ""
-    echo "Usage: $0 [monitor|once|status|detailed|live-xruns|detect|stop]"
+    echo "Usage: $0 [monitor|once|status|detailed|live-xruns|detect|check|stop]"
     echo ""
     echo "Commands:"
     echo "  monitor     - Continuous monitoring (default)"
@@ -82,6 +85,7 @@ show_help() {
     echo "  detailed    - Detailed hardware monitoring"
     echo "  live-xruns  - Live xrun monitoring (real-time)"
     echo "  detect      - Detect connected USB audio interfaces"
+    echo "  check       - Read-only diagnosis (no changes made)"
     echo "  stop        - Deactivate optimizations"
     echo ""
     echo "CPU Strategy (Hybrid for Stability):"
@@ -186,6 +190,11 @@ case "${1:-monitor}" in
 
     "detect"|"list"|"interfaces")
         show_detected_interfaces
+        ;;
+
+    "check"|"diagnose")
+        show_check
+        exit $?
         ;;
 
     "stop"|"reset")

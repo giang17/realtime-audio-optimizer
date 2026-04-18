@@ -63,8 +63,48 @@ realtime-audio-optimizer detailed
 # Live xrun monitoring
 realtime-audio-optimizer live-xruns
 
+# Read-only diagnosis (no changes)
+realtime-audio-optimizer check
+
 # Deactivate optimizations
 sudo realtime-audio-optimizer stop
+```
+
+### Diagnosis (`check`)
+
+The `check` command inspects the running system and reports what is correctly
+configured and what is not — **without making any changes**. It checks:
+
+- Kernel boot parameters (`threadirqs`, `nohz_full`, `isolcpus`)
+- `irqbalance` state and RT-CPU exclusions
+- Whether audio IRQ threads run with RT priority (SCHED_FIFO)
+- CPU governors for P-Cores / E-Cores / IRQ cores
+- USB autosuspend for connected audio devices
+- Whether the current user is in the `audio` or `realtime` group
+- IRQ sharing conflicts between audio and video devices
+
+```bash
+realtime-audio-optimizer check
+```
+
+For every ❌ finding, a short fix hint is printed (e.g. *"Run: sudo
+realtime-audio-optimizer once"* or *"Add 'threadirqs' to your kernel command
+line"*). The exit code is `0` if everything passes and `1` if at least one
+check fails, so it can be used in scripts or CI.
+
+### Sleep / Wake
+
+After `suspend` / `hibernate` the kernel resets IRQ affinity, CPU governors
+and RT priorities. The installer registers a systemd sleep hook at
+`/usr/lib/systemd/system-sleep/realtime-audio-optimizer` that re-applies the
+optimizations automatically after every wake-up (using `once-delayed`, so it
+waits for PipeWire / JACK to come back before retuning).
+
+No configuration is needed — the hook is installed and uninstalled together
+with the optimizer. To verify it is in place:
+
+```bash
+ls -l /usr/lib/systemd/system-sleep/realtime-audio-optimizer
 ```
 
 ### Automatic Mode
@@ -95,6 +135,16 @@ The optimizer uses a hybrid strategy optimized for Intel Alder Lake / Raptor Lak
 | 14-19 | E-Cores | Performance | IRQ handling |
 
 Adjust CPU ranges in `/etc/realtime-audio-optimizer.conf` for different CPU configurations.
+
+### Dynamic IRQ detection
+
+Starting with this release the optimizer detects the *actual* CPU topology
+of the running system at runtime (using `core_type` from intel-pstate on
+hybrid CPUs, or the last quarter of online CPUs on non-hybrid systems) and
+picks the best CPU range for IRQ handling automatically. If detection
+fails, the static `IRQ_CPUS` value from the configuration file is used as a
+safe fallback. To force the legacy static behaviour, set
+`RT_AUDIO_DYNAMIC_IRQS=false` in `/etc/realtime-audio-optimizer.conf`.
 
 ### Required: Kernel Boot Parameters
 
