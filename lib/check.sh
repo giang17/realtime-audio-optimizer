@@ -211,12 +211,21 @@ _check_user_groups() {
 
 _check_irq_conflicts() {
     _check_section "IRQ sharing (audio ↔ video)"
-    # check_irq_sharing prints its own warning and returns 1 on conflict
-    if check_irq_sharing; then
+    # Capture check_irq_sharing output so we can decide here whether to
+    # register this as a proper ❌ finding with a fix hint.
+    local out rc
+    out=$(check_irq_sharing)
+    rc=$?
+
+    if [ $rc -eq 0 ]; then
         _check_ok "No IRQ conflicts between audio and video devices"
     else
-        # Warning was already printed inside check_irq_sharing
-        _CHECK_FAIL_COUNT=$((_CHECK_FAIL_COUNT + 1))
+        _check_fail "Audio device shares an IRQ with a video device" \
+            "Move the devices to different USB ports or USB controllers"
+        # Show the original detailed warning(s) as well
+        if [ -n "$out" ]; then
+            echo "$out" | sed 's/^/      /'
+        fi
     fi
 }
 
