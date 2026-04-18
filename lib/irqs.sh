@@ -158,28 +158,69 @@ detect_best_irq_cpus() {
     local cpu
     local topo_file
 
-    # Probe intel-pstate hybrid topology: core_type is "atom" (E) or "core" (P)
-    for topo_file in /sys/devices/system/cpu/cpu[0-9]*/topology/core_type; do
-        [ -r "$topo_file" ] || continue
-        local kind
-        kind=$(cat "$topo_file" 2>/dev/null)
-        if [ "$kind" = "atom" ]; then
-            local cpu_dir
-            cpu_dir=$(dirname "$(dirname "$topo_file")")
-            cpu=$(basename "$cpu_dir")
-            cpu="${cpu#cpu}"
-            case "$cpu" in
-                ''|*[!0-9]*) continue ;;
-            esac
-            e_cores="$e_cores $cpu"
+    # Probe #1: Intel hybrid via perf PMU cpuset.
+    # /sys/devices/cpu_atom/cpus has existed since mainline 5.13 (Alder Lake
+    # support) and is much more widely available than topology/core_type,
+    # which some vendor kernels (e.g. Ubuntu 6.17-oem) do not export.
+    # Format is a cpuset-style range list, e.g. "8-19" or "8,10-15".
+    if [ -r /sys/devices/cpu_atom/cpus ]; then
+        local atom_list
+        atom_list=$(cat /sys/devices/cpu_atom/cpus 2>/dev/null)
+        if [ -n "$atom_list" ]; then
+            local _range _start _end _i
+            # Split on commas, then expand each "start-end" or single value
+            local IFS_old="$IFS"
+            IFS=','
+            # shellcheck disable=SC2086
+            set -- $atom_list
+            IFS="$IFS_old"
+            for _range in "$@"; do
+                case "$_range" in
+                    *-*)
+                        _start="${_range%-*}"
+                        _end="${_range#*-}"
+                        case "$_start$_end" in
+                            *[!0-9]*) continue ;;
+                        esac
+                        for ((_i=_start; _i<=_end; _i++)); do
+                            e_cores="$e_cores $_i"
+                        done
+                        ;;
+                    *)
+                        case "$_range" in
+                            ''|*[!0-9]*) continue ;;
+                        esac
+                        e_cores="$e_cores $_range"
+                        ;;
+                esac
+            done
         fi
-    done
+    fi
+
+    # Probe #2: intel-pstate topology/core_type == "atom" (newer/alternate export)
+    if [ -z "${e_cores// }" ]; then
+        for topo_file in /sys/devices/system/cpu/cpu[0-9]*/topology/core_type; do
+            [ -r "$topo_file" ] || continue
+            local kind
+            kind=$(cat "$topo_file" 2>/dev/null)
+            if [ "$kind" = "atom" ]; then
+                local cpu_dir
+                cpu_dir=$(dirname "$(dirname "$topo_file")")
+                cpu=$(basename "$cpu_dir")
+                cpu="${cpu#cpu}"
+                case "$cpu" in
+                    ''|*[!0-9]*) continue ;;
+                esac
+                e_cores="$e_cores $cpu"
+            fi
+        done
+    fi
 
     if [ -n "${e_cores// }" ]; then
         # Use the *upper half* of E-Cores for IRQ handling
         # (leaves lower E-Cores free for background tasks — matches existing strategy)
         local sorted
-        sorted=$(echo "$e_cores" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -n)
+        sorted=$(echo "$e_cores" | tr ' ' '\n' | grep -E '^[0-9]+$' | sort -un)
         local count
         count=$(echo "$sorted" | wc -l)
         if [ "$count" -ge 2 ]; then
@@ -189,11 +230,20 @@ detect_best_irq_cpus() {
             local first last
             first=$(echo "$upper" | head -n1)
             last=$(echo "$upper" | tail -n1)
-            echo "${first}-${last}"
+            local upper_count
+            upper_count=$(echo "$upper" | wc -l)
+            # Emit "first-last" only if the range is contiguous;
+            # otherwise emit a comma-separated list (valid cpuset format
+            # accepted by /proc/irq/*/smp_affinity_list).
+            if [ "$((last - first + 1))" -eq "$upper_count" ]; then
+                echo "${first}-${last}"
+            else
+                echo "$upper" | paste -sd, -
+            fi
             return 0
         else
             # Only one E-Core: use it alone
-            echo "$(echo "$sorted" | head -n1)"
+            echo "$sorted" | head -n1
             return 0
         fi
     fi

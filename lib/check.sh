@@ -176,9 +176,9 @@ _check_usb_autosuspend() {
         found=$((found + 1))
         local v
         v=$(cat "$ctrl" 2>/dev/null)
-        if [ "$v" = "on" ]; then
-            :
-        else
+        # power/control == "on"     → autosuspend disabled (good)
+        # power/control == "auto"   → autosuspend enabled  (bad for audio)
+        if [ "$v" != "on" ]; then
             bad=$((bad + 1))
         fi
     done <<< "$paths"
