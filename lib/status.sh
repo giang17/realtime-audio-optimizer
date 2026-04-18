@@ -192,6 +192,16 @@ _show_status_impl() {
     echo ""
     _show_optimization_summary
 
+    # IRQ sharing diagnostic (audio vs video)
+    if declare -f check_irq_sharing >/dev/null 2>&1; then
+        local _irq_share_out
+        _irq_share_out=$(check_irq_sharing)
+        if [ -n "$_irq_share_out" ]; then
+            echo ""
+            echo "$_irq_share_out"
+        fi
+    fi
+
     echo ""
     echo "🎯 v4 Hybrid: Stability through optimized CPU assignment, performance where needed!"
 }

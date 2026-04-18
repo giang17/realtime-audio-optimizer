@@ -1,0 +1,34 @@
+#!/bin/bash
+# systemd sleep hook for Realtime Audio Optimizer
+#
+# Invoked automatically by systemd-sleep on sleep/wake transitions:
+#   $1 = "pre"  | "post"
+#   $2 = "suspend" | "hibernate" | "hybrid-sleep" | "suspend-then-hibernate"
+#
+# After wake-up the kernel resets IRQ affinity, CPU governors and some RT
+# settings. This script re-applies the audio optimizations by invoking the
+# optimizer's "once-delayed" command (which waits briefly for audio services
+# like PipeWire / JACK to come back up before retuning).
+#
+# Installed to: /usr/lib/systemd/system-sleep/realtime-audio-optimizer
+# Make sure it is executable (chmod 755).
+
+OPTIMIZER_BIN="/usr/local/bin/realtime-audio-optimizer"
+
+case "$1/$2" in
+    post/*)
+        if [ -x "$OPTIMIZER_BIN" ]; then
+            # Run in the background so we never delay resume.
+            # Redirect output to the optimizer's log if available,
+            # otherwise to /dev/null.
+            nohup "$OPTIMIZER_BIN" once-delayed \
+                >> /var/log/realtime-audio-optimizer.log 2>&1 &
+        fi
+        ;;
+    pre/*)
+        # Nothing to do before sleep
+        :
+        ;;
+esac
+
+exit 0
