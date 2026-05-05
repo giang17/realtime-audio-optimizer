@@ -96,6 +96,23 @@ detect_usb_audio_interfaces() {
             is_usb_audio=true
         fi
 
+        # Skip MIDI-only devices (no PCM playback/capture streams).
+        # Pure MIDI controllers (e.g. Korg nanoKEY2) expose USB Audio Class
+        # but only register midi*/midiC* nodes, never pcm*.
+        if $is_usb_audio; then
+            local has_pcm=false
+            for pcm_dir in "$card_dir"/pcm*; do
+                if [ -e "$pcm_dir" ]; then
+                    has_pcm=true
+                    break
+                fi
+            done
+            if ! $has_pcm; then
+                log_debug "  Skipping MIDI-only device: $(basename "$card_dir") ($card_id)"
+                is_usb_audio=false
+            fi
+        fi
+
         if $is_usb_audio && [ -n "$card_id" ]; then
             card_name=$(basename "$card_dir")
 
@@ -123,8 +140,12 @@ detect_usb_audio_interfaces() {
         [ -f "$usb_dev" ] || continue
 
         local iface_class=$(cat "$usb_dev" 2>/dev/null)
-        # bInterfaceClass = 01 is Audio
-        if [ "$iface_class" = "01" ]; then
+        # bInterfaceClass = 01 is Audio. Skip subclass 03 (MIDI-Streaming) so
+        # that pure MIDI controllers don't register as audio interfaces.
+        local iface_subclass=""
+        local subclass_file="${usb_dev%/bInterfaceClass}/bInterfaceSubClass"
+        [ -f "$subclass_file" ] && iface_subclass=$(cat "$subclass_file" 2>/dev/null)
+        if [ "$iface_class" = "01" ] && [ "$iface_subclass" != "03" ]; then
             local usb_path="${usb_dev%/bInterfaceClass}"
             usb_path="${usb_path%/*}"  # Go up to device level
 

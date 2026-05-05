@@ -87,41 +87,73 @@ get_jack_settings() {
     local nperiods="unknown"
     local jack_status="Not active"
 
-    # Determine the original user if script runs as root via sudo
-    local original_user=""
-    if [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ]; then
-        original_user="$SUDO_USER"
-    elif [ "$EUID" -ne 0 ]; then
-        original_user="$(whoami)"
+    # Determine the target user whose JACK session we should query.
+    # When running as root (system service), we need a logged-in user with
+    # an active D-Bus session bus to talk to jackdbus.
+    local target_user=""
+    if [ "$EUID" -eq 0 ]; then
+        if [ -n "$SUDO_USER" ]; then
+            target_user="$SUDO_USER"
+        else
+            # System service: pick first user with a graphical session
+            target_user=$(who 2>/dev/null | grep "(:" | head -n1 | awk '{print $1}')
+        fi
+    else
+        target_user="$(whoami)"
     fi
 
-    # Check if JACK is running AND audio interface is available
-    if pgrep -x "jackd" > /dev/null 2>&1 || pgrep -x "jackdbus" > /dev/null 2>&1; then
-        # JACK process running, but also check if any USB audio interface is available
+    local target_uid=""
+    [ -n "$target_user" ] && target_uid=$(id -u "$target_user" 2>/dev/null)
+    local dbus_socket=""
+    [ -n "$target_uid" ] && dbus_socket="/run/user/$target_uid/bus"
+
+    # Only treat JACK as queryable if the user's D-Bus session bus is reachable.
+    # jackdbus may be auto-activated and idle; querying it without a real
+    # session bus crashes jack_control (DBusException: Unable to autolaunch
+    # without $DISPLAY).
+    local jack_queryable=false
+    if [ -n "$dbus_socket" ] && [ -S "$dbus_socket" ] && \
+       (pgrep -x "jackd" > /dev/null 2>&1 || pgrep -x "jackdbus" > /dev/null 2>&1); then
+        # Verify the JACK *server* is actually started (not just jackdbus idle)
+        local status_output
+        if [ "$EUID" -eq 0 ]; then
+            status_output=$(sudo -u "$target_user" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=$dbus_socket" \
+                XDG_RUNTIME_DIR="/run/user/$target_uid" \
+                jack_control status 2>/dev/null) || true
+        else
+            status_output=$(jack_control status 2>/dev/null) || true
+        fi
+        if echo "$status_output" | grep -q "started"; then
+            jack_queryable=true
+        fi
+    fi
+
+    if [ "$jack_queryable" = "true" ]; then
+        # Audio interface availability shapes the status label, not the query.
         local interface_available="false"
         if is_audio_interface_connected 2>/dev/null; then
             interface_available="true"
         fi
-
         if [ "$interface_available" = "true" ]; then
             jack_status="Active"
         else
             jack_status="Running (interface not available)"
         fi
 
-        # Function to execute JACK commands in user context
+        # Run jack_* helpers with the user's D-Bus session env propagated
         run_jack_command() {
             local cmd="$1"
-            if [ -n "$original_user" ] && [ "$EUID" -eq 0 ]; then
-                # As root: Use sudo -u to run in user context
-                sudo -u "$original_user" "$cmd" 2>/dev/null || echo "unknown"
+            if [ "$EUID" -eq 0 ]; then
+                sudo -u "$target_user" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=$dbus_socket" \
+                    XDG_RUNTIME_DIR="/run/user/$target_uid" \
+                    "$cmd" 2>/dev/null || echo "unknown"
             else
-                # As normal user: Execute directly
                 "$cmd" 2>/dev/null || echo "unknown"
             fi
         }
 
-        # Try to determine JACK parameters
         if command -v jack_bufsize &> /dev/null; then
             bufsize=$(run_jack_command "jack_bufsize")
         fi
@@ -131,19 +163,17 @@ get_jack_settings() {
         fi
 
         if command -v jack_control &> /dev/null; then
-            # Extract nperiods value from format "uint:set:2:3" - take the last value
-            if [ -n "$original_user" ] && [ "$EUID" -eq 0 ]; then
-                nperiods=$(sudo -u "$original_user" jack_control dp 2>/dev/null | grep nperiods | awk -F':' '{print $NF}' | tr -d ')' || echo "unknown")
+            local dp_output
+            if [ "$EUID" -eq 0 ]; then
+                dp_output=$(sudo -u "$target_user" \
+                    DBUS_SESSION_BUS_ADDRESS="unix:path=$dbus_socket" \
+                    XDG_RUNTIME_DIR="/run/user/$target_uid" \
+                    jack_control dp 2>/dev/null) || dp_output=""
             else
-                nperiods=$(jack_control dp 2>/dev/null | grep nperiods | awk -F':' '{print $NF}' | tr -d ')' || echo "unknown")
+                dp_output=$(jack_control dp 2>/dev/null) || dp_output=""
             fi
-        fi
-
-        # Fallback: If all JACK commands fail, but process runs
-        if [ "$bufsize" = "unknown" ] && [ "$samplerate" = "unknown" ] && [ -n "$original_user" ]; then
-            if [ "$jack_status" = "Active" ]; then
-                jack_status="Active (user session)"
-            fi
+            nperiods=$(echo "$dp_output" | grep nperiods | awk -F':' '{print $NF}' | tr -d ')')
+            [ -z "$nperiods" ] && nperiods="unknown"
         fi
     fi
 
