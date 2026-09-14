@@ -18,7 +18,9 @@
 #
 # DEPENDENCIES:
 #   - config.sh
-#   - checks.sh (get_audio_irqs / get_original_user / check_cpu_isolation)
+#   - checks.sh (get_audio_irqs / get_original_user / check_cpu_isolation /
+#                get_session_process_pids)
+#   - kernel.sh (get_cstate_limit_cpus)
 #   - irqs.sh   (check_irq_sharing, get_effective_irq_cpus)
 #   - interfaces.sh (detect_usb_audio_interfaces)
 #
@@ -229,6 +231,82 @@ _check_irq_conflicts() {
     fi
 }
 
+_check_audio_server_threads() {
+    _check_section "Audio server threads (JACK / PipeWire)"
+
+    local want_cpus
+    want_cpus=$(_expand_cpu_list "${AUDIO_MAIN_CPUS//,/ }" | paste -sd, -)
+
+    # JACK engine, PipeWire's JACK tunnel and pw-data-loop wake each other
+    # every period; they belong on AUDIO_MAIN_CPUS
+    local name pid task stat cpus
+    local total=0 bad_cpu=0
+    for name in jackd jackdbus pipewire; do
+        for pid in $(get_session_process_pids "$name"); do
+            for task in /proc/"$pid"/task/*; do
+                stat=$(cat "$task/stat" 2>/dev/null) || continue
+                # Fields after the command name: $39 = scheduling policy
+                # shellcheck disable=SC2086
+                set -- ${stat##*) }
+                case "${39}" in
+                    1|2) ;;
+                    *) continue ;;
+                esac
+                total=$((total + 1))
+                cpus=$(taskset -cp "${task##*/}" 2>/dev/null | sed 's/.*: //')
+                cpus=$(_expand_cpu_list "${cpus//,/ }" | paste -sd, -)
+                [ "$cpus" = "$want_cpus" ] || bad_cpu=$((bad_cpu + 1))
+            done
+        done
+    done
+
+    if [ "$total" -eq 0 ]; then
+        _check_warn "No real-time threads of JACK or PipeWire found in a user session" \
+            "Start the JACK server, then run: sudo realtime-audio-optimizer once"
+    elif [ "$bad_cpu" -eq 0 ]; then
+        _check_ok "$total real-time thread(s) on CPUs $AUDIO_MAIN_CPUS"
+    else
+        _check_fail "$bad_cpu of $total real-time thread(s) not on CPUs $AUDIO_MAIN_CPUS" \
+            "Run: systemctl start realtime-audio-optimizer-reapply.service"
+    fi
+}
+
+_check_cpu_idle_states() {
+    _check_section "CPU idle states (audio CPUs)"
+
+    if [ "${CSTATE_LIMIT_ENABLED:-true}" != "true" ]; then
+        _check_ok "C-state limit disabled in configuration (CSTATE_LIMIT_ENABLED=false)"
+        return
+    fi
+
+    local cpus
+    cpus=$(get_cstate_limit_cpus)
+    if [ -z "$cpus" ]; then
+        _check_warn "Could not determine the audio CPUs for the C-state limit"
+        return
+    fi
+
+    local cpu state latency found=0 enabled=0
+    for cpu in $(_expand_cpu_list "${cpus//,/ }"); do
+        for state in /sys/devices/system/cpu/cpu"$cpu"/cpuidle/state*; do
+            [ -r "$state/latency" ] || continue
+            latency=$(cat "$state/latency" 2>/dev/null)
+            [ "$latency" -gt "$CSTATE_MAX_LATENCY_US" ] 2>/dev/null || continue
+            found=$((found + 1))
+            [ "$(cat "$state/disable" 2>/dev/null)" = "0" ] && enabled=$((enabled + 1))
+        done
+    done
+
+    if [ "$found" -eq 0 ]; then
+        _check_ok "No idle states above ${CSTATE_MAX_LATENCY_US} us on CPUs $cpus"
+    elif [ "$enabled" -eq 0 ]; then
+        _check_ok "Idle states above ${CSTATE_MAX_LATENCY_US} us disabled on CPUs $cpus"
+    else
+        _check_fail "$enabled idle state(s) above ${CSTATE_MAX_LATENCY_US} us still enabled on CPUs $cpus" \
+            "Run: sudo realtime-audio-optimizer once"
+    fi
+}
+
 # ----------------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------------
@@ -275,6 +353,8 @@ show_check() {
     _check_irqbalance
     _check_rt_irq_threads
     _check_cpu_governors
+    _check_cpu_idle_states
+    _check_audio_server_threads
     _check_usb_autosuspend
     _check_user_groups
     _check_irq_conflicts

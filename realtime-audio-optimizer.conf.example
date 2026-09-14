@@ -24,9 +24,11 @@
 # Recommendation: Use E-Cores to avoid interrupting audio processing
 # IRQ_CPUS="14-19"
 
-# CPUs for JACK/PipeWire audio server processes
-# Recommendation: Use dedicated P-Cores for lowest latency
-# AUDIO_MAIN_CPUS="6-7"
+# CPU for JACK/PipeWire audio server processes
+# Recommendation: ONE dedicated P-Core. The JACK engine thread, PipeWire's JACK
+# tunnel and pw-data-loop wake each other every period; spread over two CPUs
+# the idle JACK DSP load rose from 1.5 % to 9.4 % (128 frames / 48 kHz).
+# AUDIO_MAIN_CPUS="6"
 
 # CPUs for DAW applications and audio plugins
 # Recommendation: Use P-Cores for maximum performance
@@ -43,21 +45,42 @@
 # REAL-TIME PRIORITY LEVELS
 # ============================================================================
 #
-# Real-time (SCHED_FIFO) priorities for audio processes.
-# Range: 1-99, higher = more priority (will preempt lower priority tasks)
+# Real-time (SCHED_FIFO) priority for the main thread of audio applications
+# (DAWs, synths, plugins from the process list). Range: 1-99.
 #
-# Priority hierarchy (highest to lowest):
-#   99 - JACK server: Must never be interrupted, handles all audio I/O
-#   85 - PipeWire: Audio graph processing
-#   80 - PipeWire-Pulse: PulseAudio compatibility layer
-#   70 - Audio apps: DAWs, synths, plugins - below audio servers
+# JACK and PipeWire are not changed: JACK sets its real-time threads from its
+# realtime-priority setting, PipeWire through RTKit. Raising them made no
+# measurable difference to the JACK DSP load.
 #
 # Note: Requires appropriate RT permissions (rtkit or limits.conf)
 
-# RT_PRIORITY_JACK=99
-# RT_PRIORITY_PIPEWIRE=85
-# RT_PRIORITY_PULSE=80
 # RT_PRIORITY_AUDIO=70
+
+# ============================================================================
+# CPU IDLE STATES (C-STATES)
+# ============================================================================
+#
+# Deep idle states save power but take long to leave. A JACK or PipeWire
+# thread woken on a CPU in such a state loses the exit latency from its cycle
+# (1048 us for the deepest state on an Intel Core Ultra 7 265, against a
+# 2667 us period at 128 frames / 48 kHz).
+#
+# When enabled, idle states with an exit latency above CSTATE_MAX_LATENCY_US
+# are disabled on the audio CPUs only, while the optimizations are active.
+# Off by default: on an Intel Core Ultra 7 265 the limit made no measurable
+# difference to the JACK DSP load, idle or with a synth playing (see README).
+# See the exit latencies of your CPU with:
+#   grep . /sys/devices/system/cpu/cpu0/cpuidle/state*/{name,latency}
+
+# Enable the limit
+# CSTATE_LIMIT_ENABLED="false"
+
+# Exit latency threshold in microseconds (200 keeps C1/C2, disables C3 there)
+# CSTATE_MAX_LATENCY_US=200
+
+# CPUs to limit. Empty = AUDIO_MAIN_CPUS plus the CPUs serving the USB audio
+# interface IRQs
+# CSTATE_LIMIT_CPUS=""
 
 # ============================================================================
 # TIMING INTERVALS

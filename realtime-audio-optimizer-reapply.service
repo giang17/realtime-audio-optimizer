@@ -1,0 +1,22 @@
+[Unit]
+Description=Realtime Audio Optimizer (Re-apply after audio server start)
+Documentation=https://github.com/giang17/realtime-audio-optimizer
+After=sound.target
+# Started on request, e.g. by ai-jack-starter after the JACK server is up.
+# JACK creates its real-time threads only when the server starts, so a run
+# from before (the boot-time run) does not reach them. The polkit rule
+# 50-realtime-audio-optimizer.rules lets members of the "audio" group start
+# this unit without a password.
+
+[Service]
+Type=oneshot
+# Give PipeWire's JACK tunnel (module-jackdbus-detect) time to connect
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/local/bin/realtime-audio-optimizer.sh once
+User=root
+StandardOutput=journal
+StandardError=journal
+
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+TimeoutStartSec=90

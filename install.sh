@@ -32,6 +32,9 @@ MAIN_SCRIPT="${SCRIPT_DIR}/realtime-audio-optimizer.sh"
 LIB_DIR="${SCRIPT_DIR}/lib"
 SERVICE_FILE="${SCRIPT_DIR}/realtime-audio-optimizer.service"
 DELAYED_SERVICE_FILE="${SCRIPT_DIR}/realtime-audio-optimizer-delayed.service"
+REAPPLY_SERVICE_FILE="${SCRIPT_DIR}/realtime-audio-optimizer-reapply.service"
+POLKIT_RULES="${SCRIPT_DIR}/support/50-realtime-audio-optimizer.rules"
+POLKIT_DIR="/etc/polkit-1/rules.d"
 UDEV_RULES="${SCRIPT_DIR}/99-realtime-audio-optimizer.rules"
 EXAMPLE_CONFIG="${SCRIPT_DIR}/realtime-audio-optimizer.conf.example"
 SLEEP_HOOK="${SCRIPT_DIR}/support/realtime-audio-optimizer.sleep"
@@ -203,6 +206,27 @@ uninstall_tray_components() {
 # ============================================================================
 # WRAPPER SCRIPT GENERATION
 # ============================================================================
+
+# Install the re-apply service and the polkit rule that lets the "audio" group
+# start it (used by both install and update). A JACK start script running as
+# the user starts the service once the server's real-time threads exist.
+install_reapply_components() {
+    if [ -f "$REAPPLY_SERVICE_FILE" ]; then
+        print_step "Installing re-apply systemd service..."
+        install -m 644 "$REAPPLY_SERVICE_FILE" "${SYSTEMD_DIR}/${SCRIPT_NAME}-reapply.service"
+        print_success "Installed re-apply service file"
+    fi
+
+    if [ -f "$POLKIT_RULES" ]; then
+        if [ -d "$POLKIT_DIR" ]; then
+            print_step "Installing polkit rule..."
+            install -m 644 "$POLKIT_RULES" "${POLKIT_DIR}/50-realtime-audio-optimizer.rules"
+            print_success "Installed polkit rule to ${POLKIT_DIR}"
+        else
+            print_warning "Polkit rules directory not found: $POLKIT_DIR (re-apply needs sudo)"
+        fi
+    fi
+}
 
 # Generate the wrapper script (used by both install and update)
 generate_wrapper_script() {
@@ -424,6 +448,8 @@ do_install() {
         print_success "Installed delayed service file"
     fi
 
+    install_reapply_components
+
     # Install udev rules
     if [ -f "$UDEV_RULES" ]; then
         print_step "Installing udev rules..."
@@ -535,7 +561,13 @@ do_uninstall() {
     print_step "Removing systemd services..."
     rm -f "${SYSTEMD_DIR}/${SCRIPT_NAME}.service"
     rm -f "${SYSTEMD_DIR}/${SCRIPT_NAME}-delayed.service"
+    rm -f "${SYSTEMD_DIR}/${SCRIPT_NAME}-reapply.service"
     print_success "Removed service files"
+
+    # Remove polkit rule
+    print_step "Removing polkit rule..."
+    rm -f "${POLKIT_DIR}/50-realtime-audio-optimizer.rules"
+    print_success "Removed polkit rule"
 
     # Remove udev rules
     print_step "Removing udev rules..."
@@ -632,6 +664,14 @@ do_update() {
     print_step "Updating main script..."
     generate_wrapper_script
     print_success "Updated main script"
+
+    # Update delayed service (timeout) and re-apply components
+    if [ -f "$DELAYED_SERVICE_FILE" ]; then
+        print_step "Updating delayed systemd service..."
+        install -m 644 "$DELAYED_SERVICE_FILE" "${SYSTEMD_DIR}/${SCRIPT_NAME}-delayed.service"
+        print_success "Updated delayed service file"
+    fi
+    install_reapply_components
 
     # Update systemd sleep/wake hook if present
     if [ -f "$SLEEP_HOOK" ]; then

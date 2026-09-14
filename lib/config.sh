@@ -15,10 +15,17 @@
 #   File Paths:
 #     LOG_FILE            : string  - System log file path
 #     STATE_FILE          : string  - Runtime state file path
+#     CSTATE_STATE_FILE   : string  - Idle states disabled by the optimizer
+#     LOCK_FILE           : string  - Lock serializing activation/deactivation
+#
+#   CPU Idle States:
+#     CSTATE_LIMIT_ENABLED  : bool   - Limit deep idle states on audio CPUs
+#     CSTATE_MAX_LATENCY_US : int    - Highest allowed exit latency (default: 200)
+#     CSTATE_LIMIT_CPUS     : string - CPUs to limit (empty = automatic)
 #
 #   CPU Assignments:
 #     IRQ_CPUS            : string  - CPU range for IRQ handling (e.g., "14-19")
-#     AUDIO_MAIN_CPUS     : string  - CPU range for JACK/PipeWire (e.g., "6-7")
+#     AUDIO_MAIN_CPUS     : string  - CPU for JACK/PipeWire (e.g., "6")
 #     DAW_CPUS            : string  - CPU range for DAW applications (e.g., "0-5")
 #     BACKGROUND_CPUS     : string  - CPU range for background tasks (e.g., "8-13")
 #     ALL_CPUS            : string  - Full CPU range for reset (e.g., "0-19")
@@ -44,9 +51,6 @@
 #     AUDIO_GREP_PATTERN  : string  - Regex pattern for finding audio processes
 #
 #   RT Priority Levels:
-#     RT_PRIORITY_JACK    : int     - JACK server priority (default: 99)
-#     RT_PRIORITY_PIPEWIRE: int     - PipeWire priority (default: 85)
-#     RT_PRIORITY_PULSE   : int     - PipeWire-Pulse priority (default: 80)
 #     RT_PRIORITY_AUDIO   : int     - Audio applications priority (default: 70)
 #
 #   Version Information:
@@ -63,6 +67,8 @@
 # shellcheck disable=SC2034  # Variables are used by other sourced modules
 LOG_FILE="/var/log/realtime-audio-optimizer.log"
 STATE_FILE="/var/run/rt-audio-state"
+CSTATE_STATE_FILE="/var/run/rt-audio-cstates"   # Idle states disabled by the optimizer
+LOCK_FILE="/var/run/rt-audio-optimizer.lock"    # Serializes activation/deactivation
 
 # ============================================================================
 # CPU ASSIGNMENTS
@@ -80,7 +86,12 @@ STATE_FILE="/var/run/rt-audio-state"
 # Note: Adjust these values if your CPU has a different core layout
 
 IRQ_CPUS="14-19"        # E-Cores for IRQ handling (stable latency)
-AUDIO_MAIN_CPUS="6-7"   # P-Cores for JACK/PipeWire main processes
+# One CPU for JACK and PipeWire: the JACK engine thread, PipeWire's JACK tunnel
+# thread and pw-data-loop wake each other every period. Measured on an Intel
+# Core Ultra 7 265 (JACK 128 frames / 48 kHz, idle): all on one CPU 1.5 % JACK
+# DSP load, engine and tunnel on two CPUs 9.4 %. With a synth playing the
+# difference was 0.4 points.
+AUDIO_MAIN_CPUS="6"     # P-Core for JACK/PipeWire
 DAW_CPUS="0-5"          # P-Cores for DAW/Plugins (maximum performance)
 BACKGROUND_CPUS="8-13"  # E-Cores for audio background tasks
 
@@ -220,20 +231,16 @@ AUDIO_PROCESSES=(
 # RT PRIORITY LEVELS
 # ============================================================================
 #
-# Real-time (SCHED_FIFO) priorities for audio processes.
-# Range: 1-99, higher = more priority (will preempt lower priority tasks)
+# Real-time (SCHED_FIFO) priority for the main thread of audio applications
+# (DAWs, synths, plugins). Range: 1-99, higher = more priority.
 #
-# Priority hierarchy (highest to lowest):
-#   99 - JACK server: Must never be interrupted, handles all audio I/O
-#   85 - PipeWire: Audio graph processing
-#   80 - PipeWire-Pulse: PulseAudio compatibility layer
-#   70 - Audio apps: DAWs, synths, plugins - below audio servers
+# JACK and PipeWire are not changed: JACK sets its real-time threads from its
+# realtime-priority setting, PipeWire through RTKit. Raising JACK and
+# PipeWire's JACK tunnel from 10/5 to 99/85 made no measurable difference to
+# the JACK DSP load.
 #
 # Note: Requires appropriate RT permissions (rtkit or limits.conf)
 
-RT_PRIORITY_JACK=99       # Highest for JACK server
-RT_PRIORITY_PIPEWIRE=85   # High for PipeWire
-RT_PRIORITY_PULSE=80      # PipeWire-Pulse
 RT_PRIORITY_AUDIO=70      # DAWs, synths, plugins
 
 # ============================================================================
@@ -284,6 +291,26 @@ TRAY_NOTIFY_ON_XRUN="${TRAY_NOTIFY_ON_XRUN:-true}"
 
 # Show desktop notification on state changes (connect/disconnect)
 TRAY_NOTIFY_ON_STATE_CHANGE="${TRAY_NOTIFY_ON_STATE_CHANGE:-true}"
+
+# ============================================================================
+# CPU IDLE STATES
+# ============================================================================
+#
+# Deep idle states (C-states) take long to leave. When enabled, states whose
+# exit latency exceeds CSTATE_MAX_LATENCY_US are disabled on the audio CPUs
+# while the optimizations are active (see kernel.sh). With intel_idle on an
+# Intel Core Ultra 7 265 the states report 1 us (C1_ACPI), 127 us (C2_ACPI)
+# and 1048 us (C3_ACPI); a threshold of 200 us disables the deepest one only.
+#
+# Off by default: on that system (JACK 128 frames / 48 kHz, all audio server
+# threads on one CPU) the JACK DSP load was 1.56 % with C3 allowed (369 C3
+# entries/s) and 1.49 % with C3 disabled; with Pianoteq playing, its JACK
+# thread on a CPU with C3 disabled gave 15.8 %, on CPUs with C3 allowed 15.4 %.
+
+CSTATE_LIMIT_ENABLED="false"
+CSTATE_MAX_LATENCY_US=200
+# Empty: AUDIO_MAIN_CPUS plus the CPUs serving the USB audio interface IRQs
+CSTATE_LIMIT_CPUS=""
 
 # ============================================================================
 # VERSION INFO

@@ -418,7 +418,7 @@ _show_cpu_governor_status() {
     fi
     echo ""
 
-    echo "   P-Cores (DAW/Plugins: 0-5, JACK/PipeWire: 6-7):"
+    echo "   P-Cores (DAW/Plugins: $DAW_CPUS, JACK/PipeWire: $AUDIO_MAIN_CPUS):"
     for cpu in 0 1 2 3 4 5 6 7; do
         _show_cpu_info "$cpu"
     done

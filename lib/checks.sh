@@ -206,6 +206,47 @@ get_original_user() {
     echo "$original_user"
 }
 
+# Get the UIDs of logged-in user sessions
+# The display manager's login screen runs in a logind session of class
+# "greeter" with its own PipeWire and JACK D-Bus service. Those processes end
+# at login and must not be taken for the user's audio stack.
+#
+# Returns: Comma-separated UID list (e.g., "1000"), empty if no user is logged in
+get_audio_session_uids() {
+    command -v loginctl &> /dev/null || return 0
+
+    local session class uid
+    loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}' | \
+    while read -r session; do
+        [ -n "$session" ] || continue
+        class=$(loginctl show-session "$session" -p Class --value 2>/dev/null)
+        [ "$class" = "user" ] || continue
+        uid=$(loginctl show-session "$session" -p User --value 2>/dev/null)
+        [ -n "$uid" ] && echo "$uid"
+    done | sort -un | paste -sd, -
+}
+
+# Get PIDs of a process owned by a logged-in user session
+# Without logind the owner is not filtered.
+#
+# Args:
+#   $1 - Exact process name
+#
+# Returns: PIDs, one per line (nothing if no user is logged in)
+get_session_process_pids() {
+    local name="$1"
+
+    if ! command -v loginctl &> /dev/null; then
+        pgrep -x "$name" 2>/dev/null
+        return 0
+    fi
+
+    local uids
+    uids=$(get_audio_session_uids)
+    [ -n "$uids" ] || return 0
+    pgrep -u "$uids" -x "$name" 2>/dev/null
+}
+
 # ============================================================================
 # IRQ DETECTION
 # ============================================================================

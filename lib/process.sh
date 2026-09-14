@@ -42,9 +42,8 @@
 #
 # PROCESS PRIORITY HIERARCHY:
 #
-#   Priority 99 : JACK server (jackd, jackdbus) on AUDIO_MAIN_CPUS
-#   Priority 85 : PipeWire on AUDIO_MAIN_CPUS
-#   Priority 80 : PipeWire-Pulse, WirePlumber on AUDIO_MAIN_CPUS
+#   JACK, PipeWire, PipeWire-Pulse, WirePlumber : all threads on AUDIO_MAIN_CPUS,
+#                                                  scheduling left to JACK / RTKit
 #   Priority 70 : DAWs, synths, plugins on DAW_CPUS
 #
 # DEPENDENCIES:
@@ -61,33 +60,34 @@
 optimize_audio_process_affinity() {
     log_info "Set audio process affinity to optimal P-Cores..."
 
-    # JACK processes to dedicated P-Cores (6-7)
-    for pid in $(pgrep -x "jackd" 2>/dev/null); do
+    # Audio servers of logged-in user sessions only - the login screen runs
+    # its own PipeWire and jackdbus, which end at login.
+    #
+    # Only the CPU placement is changed. The servers set the scheduling of
+    # their real-time threads themselves (JACK from its realtime-priority
+    # setting, PipeWire through RTKit); raising JACK and PipeWire's JACK tunnel
+    # from 10/5 to 99/85 made no measurable difference to the JACK DSP load.
+    local pid
+
+    # JACK and PipeWire share AUDIO_MAIN_CPUS
+    for pid in $(get_session_process_pids "jackd"); do
         _set_process_affinity "$pid" "$AUDIO_MAIN_CPUS" "JACK"
-        _set_process_rt_priority "$pid" "$RT_PRIORITY_JACK" "JACK"
     done
 
-    for pid in $(pgrep -x "jackdbus" 2>/dev/null); do
+    for pid in $(get_session_process_pids "jackdbus"); do
         _set_process_affinity "$pid" "$AUDIO_MAIN_CPUS" "JACK DBus"
-        _set_process_rt_priority "$pid" "$RT_PRIORITY_JACK" "JACK DBus"
     done
 
-    # PipeWire processes to P-Cores
-    for pid in $(pgrep -x "pipewire" 2>/dev/null); do
+    for pid in $(get_session_process_pids "pipewire"); do
         _set_process_affinity "$pid" "$AUDIO_MAIN_CPUS" "PipeWire"
-        _set_process_rt_priority "$pid" "$RT_PRIORITY_PIPEWIRE" "PipeWire"
     done
 
-    # PipeWire-Pulse to P-Cores
-    for pid in $(pgrep -x "pipewire-pulse" 2>/dev/null); do
+    for pid in $(get_session_process_pids "pipewire-pulse"); do
         _set_process_affinity "$pid" "$AUDIO_MAIN_CPUS" "PipeWire-Pulse"
-        _set_process_rt_priority "$pid" "$RT_PRIORITY_PULSE" "PipeWire-Pulse"
     done
 
-    # WirePlumber to P-Cores
-    for pid in $(pgrep -x "wireplumber" 2>/dev/null); do
+    for pid in $(get_session_process_pids "wireplumber"); do
         _set_process_affinity "$pid" "$AUDIO_MAIN_CPUS" "WirePlumber"
-        _set_process_rt_priority "$pid" "$RT_PRIORITY_PULSE" "WirePlumber"
     done
 
     # Optimize all audio applications from the unified list
@@ -127,7 +127,7 @@ reset_audio_process_affinity() {
         for pid in $(pgrep -i -x "$process" 2>/dev/null); do
             # Reset to all CPUs
             if command -v taskset &> /dev/null; then
-                taskset -cp "$ALL_CPUS" "$pid" 2>/dev/null
+                taskset -a -cp "$ALL_CPUS" "$pid" 2>/dev/null
                 result=$?
                 if [ $result -eq 0 ]; then
                     log_debug "  Process $process ($pid) reset to all CPUs ($ALL_CPUS)"
@@ -156,7 +156,9 @@ _set_process_affinity() {
         return 1
     fi
 
-    if taskset -cp "$cpus" "$pid" > /dev/null 2>&1; then
+    # -a: all threads. Without it only the main thread moves, and threads that
+    # already exist (e.g. JACK's real-time threads) keep their old CPU mask.
+    if taskset -a -cp "$cpus" "$pid" > /dev/null 2>&1; then
         log_info "  $name (PID $pid) -> CPUs $cpus"
         return 0
     fi

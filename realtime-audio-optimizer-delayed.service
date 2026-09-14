@@ -19,8 +19,9 @@ StandardError=journal
 # Environment variables
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# Increase timeout for wait times
-TimeoutStartSec=60
+# Increase timeout for wait times: 15 s ExecStartPre + up to MAX_AUDIO_WAIT
+# (45 s) for a user login + 3 s settle time + the optimization itself
+TimeoutStartSec=90
 
 # Service runs only on-demand, no automatic restart
 # Restart=no (default)

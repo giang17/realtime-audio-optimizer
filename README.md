@@ -111,6 +111,32 @@ ls -l /usr/lib/systemd/system-sleep/realtime-audio-optimizer
 
 The optimizer automatically activates when a USB audio interface is connected via udev rules.
 
+At boot, `realtime-audio-optimizer-delayed.service` waits for the audio servers
+of a **logged-in user session** (logind session class `user`). The display
+manager's login screen runs its own PipeWire and JACK D-Bus service in a session
+of class `greeter`; those processes end at login and are ignored.
+
+### Re-apply after the JACK server starts
+
+JACK creates its real-time threads only when the server starts, which is usually
+after the boot-time run. `realtime-audio-optimizer-reapply.service` runs the
+optimization again, and the installed polkit rule
+(`/etc/polkit-1/rules.d/50-realtime-audio-optimizer.rules`) lets members of the
+`audio` group start it without a password:
+
+```bash
+systemctl start realtime-audio-optimizer-reapply.service
+```
+
+[ai-jack-starter](https://github.com/giang17/ai-jack-starter) starts it
+automatically after every JACK start. Other start scripts can add the line above.
+
+The optimizer moves **all threads** of JACK, PipeWire, PipeWire-Pulse and
+WirePlumber to `AUDIO_MAIN_CPUS` (one CPU by default, see "CPU idle states" for
+the measurements). It does not change their scheduling: JACK sets its real-time
+threads from its `realtime-priority` setting and PipeWire through RTKit; raising
+JACK and PipeWire's JACK tunnel from 10/5 to 99/85 made no measurable difference.
+
 ### System Tray
 
 ```bash
@@ -130,7 +156,8 @@ The optimizer uses a hybrid strategy optimized for Intel Alder Lake / Raptor Lak
 | CPU Range | Type | Governor | Purpose |
 |-----------|------|----------|---------|
 | 0-5 | P-Cores | Performance | DAWs, Plugins |
-| 6-7 | P-Cores | Performance | JACK/PipeWire |
+| 6 | P-Core | Performance | JACK/PipeWire |
+| 7 | P-Core | Performance | Not assigned |
 | 8-13 | E-Cores | Powersave | Background tasks |
 | 14-19 | E-Cores | Performance | IRQ handling |
 
@@ -145,6 +172,51 @@ picks the best CPU range for IRQ handling automatically. If detection
 fails, the static `IRQ_CPUS` value from the configuration file is used as a
 safe fallback. To force the legacy static behaviour, set
 `RT_AUDIO_DYNAMIC_IRQS=false` in `/etc/realtime-audio-optimizer.conf`.
+
+### CPU idle states (C-states)
+
+A CPU with nothing to do enters an idle state. Deeper states save more power but
+take longer to leave, and a JACK or PipeWire thread woken on such a CPU loses
+that time from its cycle. With `intel_idle` on an Intel Core Ultra 7 265 the
+states report these exit latencies:
+
+| State | Exit latency |
+|-------|--------------|
+| C1_ACPI | 1 µs |
+| C2_ACPI | 127 µs |
+| C3_ACPI | 1048 µs |
+
+At 128 frames / 48 kHz a JACK period lasts 2667 µs, so a wake-up from C3 can
+take up to 39 % of it. With `CSTATE_LIMIT_ENABLED="true"` the optimizer disables
+idle states with an exit latency above `CSTATE_MAX_LATENCY_US` (default 200 µs,
+i.e. C3 only) on the **audio CPUs only**: `AUDIO_MAIN_CPUS` plus the CPUs serving
+the USB audio interface IRQs. All other CPUs keep every idle state. `stop`
+re-enables exactly the states the optimizer disabled.
+
+The limit is **off by default**, because it made no measurable difference on the
+system above (JACK 128 frames / 48 kHz, MOTU M4, JACK DSP load from
+`jack_cpu_load`, 0.5 s samples):
+
+| Condition | C3 allowed | C3 disabled |
+|-----------|-----------|-------------|
+| Idle, all audio server threads on one CPU (60 s / 20 s) | 1.56 % (369 C3 entries/s) | 1.49 % |
+| Pianoteq playing, its JACK thread on a CPU other than JACK's (45 s × 2) | 15.4 % | 15.8 % |
+
+What did matter was **thread placement**: the JACK engine thread, the client's
+JACK thread and PipeWire's JACK tunnel on the same CPU gave 1.5 % idle instead of
+9.4 % with the engine and tunnel on two CPUs, and 11 % instead of 15.5 % with
+Pianoteq's JACK thread next to the engine.
+
+```bash
+# Exit latencies of your CPU
+grep . /sys/devices/system/cpu/cpu0/cpuidle/state*/{name,latency}
+
+# Verify (read-only)
+realtime-audio-optimizer check
+```
+
+Set `CSTATE_LIMIT_ENABLED="false"` in `/etc/realtime-audio-optimizer.conf` to
+turn the limit off.
 
 ### Required: Kernel Boot Parameters
 
@@ -184,15 +256,18 @@ sudo nano /etc/realtime-audio-optimizer.conf
 ```bash
 # CPU assignments (adjust for your CPU)
 IRQ_CPUS="14-19"
-AUDIO_MAIN_CPUS="6-7"
+AUDIO_MAIN_CPUS="6"           # one CPU for JACK + PipeWire
 DAW_CPUS="0-5"
 BACKGROUND_CPUS="8-13"
 ALL_CPUS="0-19"
 
-# RT priority levels
-RT_PRIORITY_JACK=99
-RT_PRIORITY_PIPEWIRE=85
+# RT priority of audio applications (JACK/PipeWire keep their own)
 RT_PRIORITY_AUDIO=70
+
+# Deep idle states on the audio CPUs (see "CPU idle states")
+CSTATE_LIMIT_ENABLED="false"
+CSTATE_MAX_LATENCY_US=200
+CSTATE_LIMIT_CPUS=""          # empty = AUDIO_MAIN_CPUS + USB audio IRQ CPUs
 
 # Additional audio processes to optimize
 EXTRA_AUDIO_PROCESSES="my-custom-daw my-synth"

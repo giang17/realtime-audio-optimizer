@@ -95,7 +95,7 @@ show_help() {
     echo ""
     echo "Process pinning:"
     echo "  P-Cores 0-5: DAW/Plugins (maximum single-thread performance)"
-    echo "  P-Cores 6-7: JACK/PipeWire (dedicated audio engine)"
+    echo "  P-Core 6:    JACK/PipeWire (dedicated audio engine)"
     echo "  E-Cores 8-13: Background-Tasks"
     echo "  E-Cores 14-19: IRQ handling (stable latency)"
     echo ""

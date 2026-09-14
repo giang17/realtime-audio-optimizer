@@ -33,6 +33,22 @@
 #                 /proc/sys/dev/hpet/max-user-freq -> 2048
 #                 /sys/class/net/*/queues/rx-*/rps_cpus -> 0x3f00
 #
+#   get_cstate_limit_cpus()
+#     Gets the CPUs whose deep idle states are limited.
+#     @return : string - Comma-separated CPU list (e.g., "6,7,14")
+#
+#   limit_audio_cpu_cstates()
+#     Disables idle states above CSTATE_MAX_LATENCY_US on the audio CPUs.
+#     @return   : void
+#     @requires : Root privileges
+#     @modifies : /sys/devices/system/cpu/cpuN/cpuidle/stateM/disable -> 1
+#                 CSTATE_STATE_FILE (list of disabled states)
+#
+#   restore_cpu_cstates([quiet])
+#     Re-enables the idle states disabled by limit_audio_cpu_cstates.
+#     @return   : void
+#     @requires : Root privileges
+#
 #   get_rt_runtime()
 #     Gets current RT scheduling limit.
 #     @return : string - Value in microseconds, "-1", or "N/A"
@@ -256,6 +272,112 @@ _optimize_network_rps() {
         fi
     done
     log_debug "  Network-Interrupts redirected to Background-E-Cores"
+}
+
+# ============================================================================
+# CPU IDLE STATES
+# ============================================================================
+#
+# A CPU with nothing to do enters an idle state (C-state). Deeper states save
+# more power but take longer to leave; cpuidle reports that exit latency per
+# state. With intel_idle on an Intel Core Ultra 7 265 the deepest state
+# (C3_ACPI) reports 1048 us, against a JACK period of 2667 us at 128 frames
+# and 48 kHz. A JACK or PipeWire thread woken on such a CPU loses that time
+# from its cycle.
+#
+# The limit uses cpuidle's per-CPU "disable" flag and applies only to the CPUs
+# that run the audio servers and serve the USB audio interface IRQs; all other
+# CPUs keep every idle state. Only states disabled here are recorded in
+# CSTATE_STATE_FILE and re-enabled on reset.
+
+# Get the CPUs whose deep idle states are limited
+# CSTATE_LIMIT_CPUS overrides the automatic choice.
+#
+# Returns: Comma-separated CPU list (e.g., "6,7,14")
+get_cstate_limit_cpus() {
+    if [ -n "${CSTATE_LIMIT_CPUS:-}" ]; then
+        _expand_cpu_list "${CSTATE_LIMIT_CPUS//,/ }" | sort -un | paste -sd, -
+        return 0
+    fi
+
+    local cpus="${AUDIO_MAIN_CPUS//,/ }"
+    local irqs="" usb_path irq
+
+    # Must run in this shell: it fills DETECTED_INTERFACES
+    detect_usb_audio_interfaces > /dev/null 2>&1
+    while IFS= read -r usb_path; do
+        [ -n "$usb_path" ] || continue
+        irqs="$irqs $(_irqs_for_sysfs_device "$usb_path")"
+    done <<< "$(get_audio_interface_usb_paths)"
+
+    # A USB controller has several MSI vectors; the kernel places each one on
+    # a single CPU out of the affinity mask
+    for irq in $irqs; do
+        [ -r "/proc/irq/$irq/effective_affinity_list" ] || continue
+        cpus="$cpus $(tr ',' ' ' < "/proc/irq/$irq/effective_affinity_list")"
+    done
+
+    _expand_cpu_list "$cpus" | sort -un | paste -sd, -
+}
+
+# Disable idle states above CSTATE_MAX_LATENCY_US on the audio CPUs
+# Requires root privileges.
+limit_audio_cpu_cstates() {
+    # Undo a previous run first, so a changed CPU set leaves nothing behind
+    restore_cpu_cstates quiet
+
+    if [ "${CSTATE_LIMIT_ENABLED:-true}" != "true" ]; then
+        log_debug "  C-state limit disabled by configuration"
+        return 0
+    fi
+
+    local cpus
+    cpus=$(get_cstate_limit_cpus)
+    if [ -z "$cpus" ]; then
+        log_warn "No CPUs found for the C-state limit"
+        return 0
+    fi
+
+    : > "$CSTATE_STATE_FILE" 2>/dev/null || return 0
+
+    local cpu state latency name names="" count=0
+    for cpu in $(_expand_cpu_list "${cpus//,/ }"); do
+        for state in /sys/devices/system/cpu/cpu"$cpu"/cpuidle/state*; do
+            [ -w "$state/disable" ] || continue
+            latency=$(cat "$state/latency" 2>/dev/null) || continue
+            [ "$latency" -gt "$CSTATE_MAX_LATENCY_US" ] 2>/dev/null || continue
+            [ "$(cat "$state/disable" 2>/dev/null)" = "0" ] || continue
+            if echo 1 > "$state/disable" 2>/dev/null; then
+                echo "$state" >> "$CSTATE_STATE_FILE"
+                count=$((count + 1))
+                name=$(cat "$state/name" 2>/dev/null)
+                case " $names " in
+                    *" $name "*) ;;
+                    *) names="${names:+$names }$name" ;;
+                esac
+            fi
+        done
+    done
+
+    log_info "Limit idle states on audio CPUs ($cpus): ${names:-none} disabled (exit latency > ${CSTATE_MAX_LATENCY_US} us, $count state(s))"
+}
+
+# Re-enable the idle states disabled by limit_audio_cpu_cstates
+# States disabled by anything else are left alone.
+#
+# Args:
+#   $1 - "quiet" to skip the log line
+restore_cpu_cstates() {
+    [ -f "$CSTATE_STATE_FILE" ] || return 0
+
+    local state count=0
+    while IFS= read -r state; do
+        { [ -n "$state" ] && [ -w "$state/disable" ]; } || continue
+        echo 0 > "$state/disable" 2>/dev/null && count=$((count + 1))
+    done < "$CSTATE_STATE_FILE"
+    rm -f "$CSTATE_STATE_FILE"
+
+    [ "${1:-}" = "quiet" ] || log_info "Restored $count idle state(s) disabled by the optimizer"
 }
 
 # ============================================================================

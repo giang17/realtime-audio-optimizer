@@ -474,13 +474,15 @@ delayed_service_start() {
         local found_user_audio=false
 
         while [ $audio_wait -lt $MAX_AUDIO_WAIT ]; do
-            # Check for user audio processes (not just system audio)
-            local user_pipewire user_jack
-            user_pipewire=$(pgrep -f "pipewire" | wc -l)
-            user_jack=$(pgrep -f "jackdbus" | wc -l)
+            # Count only processes of logged-in user sessions: the login screen
+            # starts PipeWire and jackdbus as well, and those end at login
+            local user_pipewire user_jack session_uids
+            session_uids=$(get_audio_session_uids)
+            user_pipewire=$(get_session_process_pids "pipewire" | wc -l)
+            user_jack=$({ get_session_process_pids "jackdbus"; get_session_process_pids "jackd"; } | wc -l)
 
-            if [ "$user_pipewire" -ge 2 ] || [ "$user_jack" -ge 1 ]; then
-                log_info "🎯 User audio services detected after ${audio_wait}s (PipeWire: $user_pipewire, JACK: $user_jack)"
+            if [ "$user_pipewire" -ge 1 ] || [ "$user_jack" -ge 1 ]; then
+                log_info "🎯 User audio services detected after ${audio_wait}s (UID: ${session_uids:-any}, PipeWire: $user_pipewire, JACK: $user_jack)"
                 found_user_audio=true
                 break
             fi

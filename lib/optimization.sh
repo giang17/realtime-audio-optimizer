@@ -52,6 +52,8 @@
 
 # Activate audio optimizations - Hybrid Strategy (Stability-optimized)
 activate_audio_optimizations() {
+    _acquire_optimizer_lock
+
     local interface_names
     interface_names=$(get_audio_interface_names 2>/dev/null || echo "USB Audio")
 
@@ -88,6 +90,10 @@ activate_audio_optimizations() {
     # Advanced audio optimizations
     optimize_advanced_audio_settings
 
+    # Limit deep idle states on the audio CPUs (after the IRQ placement,
+    # which decides the CPUs serving the audio interface)
+    limit_audio_cpu_cstates
+
     # Save state
     set_state "optimized"
     log_info "Hybrid audio optimizations activated - Stability and performance optimal!"
@@ -108,8 +114,19 @@ activate_audio_optimizations() {
 # MAIN DEACTIVATION
 # ============================================================================
 
+# Serialize activation and deactivation
+# The boot-time run (once-delayed) and the re-apply after a JACK start can
+# overlap. The lock is released when the calling process exits.
+_acquire_optimizer_lock() {
+    command -v flock &> /dev/null || return 0
+    { exec 9> "$LOCK_FILE"; } 2>/dev/null || return 0
+    flock -w 60 9 || log_warn "Optimizer lock not acquired within 60 s - continuing"
+}
+
 # Deactivate audio optimizations - Back to standard
 deactivate_audio_optimizations() {
+    _acquire_optimizer_lock
+
     log_info "No audio interface detected - Reset to standard configuration..."
 
     # Reset audio-relevant CPUs (P-Cores + IRQ E-Cores)
@@ -126,6 +143,9 @@ deactivate_audio_optimizations() {
 
     # Reset kernel parameters
     reset_kernel_parameters
+
+    # Re-enable the idle states disabled on the audio CPUs
+    restore_cpu_cstates
 
     # Save state
     set_state "standard"

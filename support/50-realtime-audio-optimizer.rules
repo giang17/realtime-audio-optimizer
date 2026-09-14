@@ -1,0 +1,20 @@
+// Polkit rule for Realtime Audio Optimizer
+// Allows members of the "audio" group to start the re-apply service without
+// password, so a JACK start script running as the user can re-apply the
+// optimizations to the new server threads.
+//
+// Installation (done by install.sh):
+//   sudo install -m 644 50-realtime-audio-optimizer.rules /etc/polkit-1/rules.d/
+//
+// Prerequisite: User must be in the "audio" group
+//   sudo usermod -aG audio $USER
+//   (Re-login required)
+
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "realtime-audio-optimizer-reapply.service" &&
+        action.lookup("verb") == "start" &&
+        subject.isInGroup("audio")) {
+        return polkit.Result.YES;
+    }
+});
