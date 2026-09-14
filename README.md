@@ -205,7 +205,8 @@ system above (JACK 128 frames / 48 kHz, MOTU M4, JACK DSP load from
 What did matter was **thread placement**: the JACK engine thread, the client's
 JACK thread and PipeWire's JACK tunnel on the same CPU gave 1.5 % idle instead of
 9.4 % with the engine and tunnel on two CPUs, and 11 % instead of 15.5 % with
-Pianoteq's JACK thread next to the engine.
+Pianoteq's JACK thread next to the engine. The tools and the full results are in
+[tools/README.md](tools/README.md).
 
 ```bash
 # Exit latencies of your CPU
