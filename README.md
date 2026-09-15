@@ -109,7 +109,11 @@ ls -l /usr/lib/systemd/system-sleep/realtime-audio-optimizer
 
 ### Automatic Mode
 
-The optimizer automatically activates when a USB audio interface is connected via udev rules.
+The optimizer activates when a USB audio interface is connected and deactivates
+when it is removed, driven by udev rules. Only devices with a USB Audio
+Streaming interface count; MIDI-only controllers neither start nor stop it.
+How udev, the systemd units and the JACK starter work together is described in
+[HYBRID-ARCHITECTURE.md](HYBRID-ARCHITECTURE.md).
 
 At boot, `realtime-audio-optimizer-delayed.service` waits for the audio servers
 of a **logged-in user session** (logind session class `user`). The display

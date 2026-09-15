@@ -492,16 +492,17 @@ do_install() {
     systemctl daemon-reload
     if [ -f "$UDEV_RULES" ]; then
         udevadm control --reload-rules
-        udevadm trigger --subsystem-match=usb
+        # Replay the "add" event of every sound control device so that the
+        # rule starts the delayed service now if an audio interface is already
+        # connected. The rule matches the "sound" subsystem, not "usb".
+        udevadm trigger --subsystem-match=sound --sysname-match='controlC*' --action=add
     fi
     print_success "System daemons reloaded"
 
-    # Enable service (but don't start - udev will handle that)
-    if [ -f "${SYSTEMD_DIR}/${SCRIPT_NAME}.service" ]; then
-        print_step "Enabling service..."
-        systemctl enable "${SCRIPT_NAME}.service" 2>/dev/null || true
-        print_success "Service enabled (will start automatically when audio interface is connected)"
-    fi
+    # The units are static (no [Install] section): udev starts the delayed
+    # service when an audio interface is connected and stops it when the
+    # interface is removed. There is nothing to enable.
+    print_info "Services are started by udev when an audio interface is connected"
 
     # Install tray components (optional)
     install_tray_components
@@ -538,13 +539,12 @@ do_uninstall() {
     print_info "Uninstalling Realtime Audio Optimizer..."
     echo ""
 
-    # Stop and disable service
-    print_step "Stopping and disabling services..."
+    # Stop the services (static units, nothing to disable); stopping the
+    # active one restores the system
+    print_step "Stopping services..."
     systemctl stop "${SCRIPT_NAME}.service" 2>/dev/null || true
     systemctl stop "${SCRIPT_NAME}-delayed.service" 2>/dev/null || true
-    systemctl disable "${SCRIPT_NAME}.service" 2>/dev/null || true
-    systemctl disable "${SCRIPT_NAME}-delayed.service" 2>/dev/null || true
-    print_success "Services stopped and disabled"
+    print_success "Services stopped"
 
     # Remove main script and symlink
     print_step "Removing scripts..."

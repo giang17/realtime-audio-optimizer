@@ -1,20 +1,36 @@
 # Realtime Audio Optimizer - udev rules for USB audio interfaces
 #
-# Triggers the realtime-audio-optimizer service when any USB audio device is connected.
-# This uses a generic approach that works with all USB Audio Class devices.
+# Starts the delayed optimizer service when a USB audio interface is
+# connected and stops it when the interface is removed.
+#
+# "Audio interface" means a USB device with an Audio Streaming interface
+# (USB Audio Class, interface class 01, subclass 02). udev records every
+# interface of a USB device in ID_USB_INTERFACES as ":ccsspp:" triples, so
+# ":0102" matches devices that carry PCM streams. MIDI-only controllers
+# (subclass 03, e.g. Korg nanoKEY2) do not match and never start or stop
+# the optimizer. ID_USB_INTERFACES is kept in the udev database, so it is
+# still available on the remove event.
+#
+# Both services are static units without an [Install] section: udev is the
+# only thing that starts them. The delayed service is a oneshot with
+# RemainAfterExit, so starting it again while it is active is a no-op, and
+# stopping it runs "realtime-audio-optimizer.sh stop", which restores the
+# governors, IRQ affinities and idle states.
 
 # Debug logging for sound events
 SUBSYSTEM=="sound", ACTION=="add", \
     RUN+="/bin/logger 'RT-Audio-Optimizer: Sound device added: %k'"
 
-# When a sound control device is added, check for USB audio interfaces
-# The /proc/asound/*/usbid file exists only for USB audio devices
-SUBSYSTEM=="sound", KERNEL=="controlC*", ACTION=="add", \
-    RUN+="/bin/logger 'RT-Audio-Optimizer: Control device added: %k'", \
-    RUN+="/bin/sleep 0.5", \
-    RUN+="/bin/sh -c 'if ls /proc/asound/*/usbid 2>/dev/null | head -1 | xargs -I{} test -f {} 2>/dev/null; then logger \"RT-Audio-Optimizer: USB audio interface detected - Starting service (delayed)\"; systemctl --no-block start realtime-audio-optimizer-delayed.service; fi'"
+# USB audio interface connected: start the delayed service. It waits for the
+# audio servers of a logged-in user session before pinning their threads.
+SUBSYSTEM=="sound", KERNEL=="controlC*", ACTION=="add", ENV{ID_USB_INTERFACES}=="*:0102*", \
+    RUN+="/bin/logger 'RT-Audio-Optimizer: USB audio interface added (%k) - Starting service (delayed)'", \
+    RUN+="/bin/systemctl --no-block start realtime-audio-optimizer-delayed.service"
 
-# When a sound device is removed, stop the service
-SUBSYSTEM=="sound", KERNEL=="card*", ACTION=="remove", \
-    RUN+="/bin/logger 'RT-Audio-Optimizer: Sound device removed - Stopping service'", \
-    RUN+="/bin/systemctl --no-block stop realtime-audio-optimizer.service"
+# USB audio interface removed: stop the service that udev started. The
+# on-demand unit is stopped as well in case it was started by hand. With two
+# interfaces connected, removing either one deactivates the optimizations;
+# plugging an interface back in starts them again.
+SUBSYSTEM=="sound", KERNEL=="card*", ACTION=="remove", ENV{ID_USB_INTERFACES}=="*:0102*", \
+    RUN+="/bin/logger 'RT-Audio-Optimizer: USB audio interface removed (%k) - Stopping service'", \
+    RUN+="/bin/systemctl --no-block stop realtime-audio-optimizer-delayed.service realtime-audio-optimizer.service"
