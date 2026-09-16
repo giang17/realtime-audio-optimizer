@@ -197,16 +197,23 @@ i.e. C3 only) on the **audio CPUs only**: `AUDIO_MAIN_CPUS` plus the CPUs servin
 the USB audio interface IRQs. All other CPUs keep every idle state. `stop`
 re-enables exactly the states the optimizer disabled.
 
-The limit is **off by default**, because it made no measurable difference on the
-system above (JACK 128 frames / 48 kHz, MOTU M4, JACK DSP load from
-`jack_cpu_load`, 0.5 s samples):
+The limit is **off by default**, because it made no measurable difference for
+the audio server threads on the system above (JACK 128 frames / 48 kHz, MOTU
+M4, JACK DSP load from `jack_cpu_load`, 0.5 s samples):
 
 | Condition | C3 allowed | C3 disabled |
 |-----------|-----------|-------------|
 | Idle, all audio server threads on one CPU (60 s / 20 s) | 1.56 % (369 C3 entries/s) | 1.49 % |
 | Pianoteq playing, its JACK thread on a CPU other than JACK's (45 s × 2) | 15.4 % | 15.8 % |
 
-What did matter was **thread placement**: the JACK engine thread, the client's
+It does matter for a **client with worker threads that wake every period**:
+Pianoteq 9 with multicore rendering runs five workers that entered C3 800-1000
+times per second on the P-cores, and its xruns at 128 frames halved (1.3 to
+0.6 per minute on the demo song) with `CSTATE_LIMIT_ENABLED="true"` and
+`CSTATE_LIMIT_CPUS="0-7"`. The measurement is in
+[tools/README.md](tools/README.md).
+
+What did matter for the servers was **thread placement**: the JACK engine thread, the client's
 JACK thread and PipeWire's JACK tunnel on the same CPU gave 1.5 % idle instead of
 9.4 % with the engine and tunnel on two CPUs, and 11 % instead of 15.5 % with
 Pianoteq's JACK thread next to the engine. The tools and the full results are in

@@ -10,6 +10,7 @@ needs root: CPU affinity of your own threads can be changed as a normal user.
 | `thread-cpu-sample.sh` | Sample which CPU given threads run on (every 50 ms) |
 | `server-placement-ab.py` | Alternate all JACK/PipeWire server threads between two CPU sets, measure each phase |
 | `client-placement-ab.sh` | Alternate a JACK client's real-time threads between free placement and the JACK engine's CPU |
+| `xrun-thread-correlate.py` | Record where a client's real-time threads ran in the 500 ms before each xrun |
 
 ## Usage
 
@@ -25,6 +26,10 @@ AUDIO_CPU=6 tools/client-placement-ab.sh Pianoteq free,cb,free,cb 45
 
 # Long process names are truncated to 15 characters: pass the PID
 tools/client-placement-ab.sh "$(pgrep -u "$USER" BitwigAudioEngi | head -1)"
+
+# Xruns: sample the client's RT threads every 50 ms for 15 min, dump the
+# window around each "XRun" line of the jackdbus log
+tools/xrun-thread-correlate.py 900 Pianoteq
 ```
 
 `server-placement-ab.py` leaves the server threads in the placement of the
@@ -61,6 +66,16 @@ needed about 8 µs per cycle (`pw-top`), while the reported load moved between
 - **Changing C-states needs root** and is not done by these tools:
   `echo 0 | sudo tee /sys/devices/system/cpu/cpu6/cpuidle/state3/disable`
   (1 = disable again).
+- **`/proc/<tid>/sched` wait statistics are unusable for real-time threads
+  that migrate.** With `kernel.sched_schedstats=1`, `wait_max` of Pianoteq's
+  workers jumped to the system uptime within milliseconds of a reset
+  (`echo 0 > /proc/<tid>/sched`), with only 3-5 wait samples counted, so
+  some enqueue path of migrating RT threads leaves the wait start stamp at
+  zero (kernel 6.17; not traced in the source). `nr_involuntary_switches` is
+  still valid.
+- **50 ms sampling cannot see a 2.7 ms period.** The xrun tool shows the
+  placement tendency around an xrun, not the xrun period itself; use it to
+  rank hypotheses, then test them with the xrun rate.
 
 ## Results
 
@@ -77,3 +92,38 @@ PipeWire JACK tunnel, 0.5 s samples:
 | Pianoteq 9 playing: its callback free / on the engine's CPU | 15.4 % / 11.0 % |
 | Pianoteq 9 playing: callback on another CPU with C3 disabled | 15.8 % |
 | Bitwig demo song: callback free / on the engine's CPU | 24.1 % / 22.6 % (within drift) |
+
+### Xruns of a multi-threaded client (2026-09-16)
+
+Pianoteq 9 with "Multicore rendering: max" runs its JACK callback (SCHED_FIFO 5)
+and five workers `fasthp-1..5` (SCHED_RR 64), affinity 0-13, all woken every
+period. Its demo song at 128 frames produced xruns reported as
+`client = Pianoteq was not finished` at about 1.3 per minute, with the servers
+on CPU 6 and the DSP load at 20-25 %.
+
+Measured with `xrun-thread-correlate.py` (14 xruns, 10 min) and `/proc`
+counters:
+
+- The JACK engine's CPU is not involved: client samples on CPU 6 were 7.1 %
+  overall and 9.8 % in the xrun windows, and the engine thread was asleep in
+  nearly every sample.
+- E-cores 8-13 contribute a little: 9.5 % of all client samples, 12 % in the
+  windows, 17-20 % in two of them.
+- The callback thread had 1.24 million involuntary context switches, about
+  two per period. IRQ threads were not involved (no CPU time, device
+  interrupts on CPUs 0-13 in the range of one per second), which leaves its
+  own workers (RR 64 > FIFO 5) landing on its CPU as the only higher-priority
+  real-time threads that ran.
+- The worker CPUs entered C3 800-1000 times per second, two to three times
+  per period, with a 1048 µs exit latency against a 2667 µs period.
+
+| Condition (demo song, same settings) | Xruns |
+|--------------------------------------|-------|
+| C3 allowed on CPUs 0-7, 10 min | 13 (1.3/min) |
+| C3 disabled on CPUs 0-7, 5 min | 3 (0.6/min) |
+
+So the C-state limit that made no difference for the server threads (table
+above) halves the xruns of a client whose workers wake from C3 every period.
+This is why `CSTATE_LIMIT_CPUS="0-7"` is a documented option; the E-cores
+keep every idle state, which leaves the workers' 9.5 % of samples there as
+the next candidate (pin the client to 0-7 via `EXTRA_AUDIO_PROCESSES`).
